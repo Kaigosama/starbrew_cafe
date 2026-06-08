@@ -1,0 +1,144 @@
+import { useMemo, useState } from 'react';
+import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
+import { StatusBar } from 'expo-status-bar';
+import { router } from 'expo-router';
+import { R, FS, Sp, cardShadow } from '../../constants/theme';
+import { useTheme } from '../../context/ThemeContext';
+
+type Filter = 'All' | 'Pick-up' | 'Delivery';
+const FILTERS: Filter[] = ['All', 'Pick-up', 'Delivery'];
+
+const ORDERS = [
+  { id: '1', name: 'Cold Brew + 1 more',              date: 'Apr 26, 2026', total: 370, type: 'Pick-up' as Filter,   status: 'Completed' },
+  { id: '2', name: 'Vanilla Latte',                   date: 'Apr 25, 2026', total: 185, type: 'Delivery' as Filter,  status: 'Completed' },
+  { id: '3', name: 'Caramel Frappuccino + 2 more',    date: 'Apr 22, 2026', total: 615, type: 'Pick-up' as Filter,   status: 'Completed' },
+  { id: '4', name: 'Nitro Cold Brew',                 date: 'Apr 20, 2026', total: 185, type: 'Pick-up' as Filter,   status: 'Cancelled' },
+  { id: '5', name: 'Hazelnut Mocha',                  date: 'Apr 18, 2026', total: 185, type: 'Delivery' as Filter,  status: 'Completed' },
+];
+
+export default function OrderHistoryScreen() {
+  const { colors, isDark } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const [filter, setFilter] = useState<Filter>('All');
+
+  const filtered = filter === 'All' ? ORDERS : ORDERS.filter(o => o.type === filter);
+
+  return (
+    <View style={styles.root}>
+      <StatusBar style={isDark ? 'light' : 'dark'} />
+
+      <SafeAreaView edges={['top']}>
+        <View style={styles.headerRow}>
+          <TouchableOpacity onPress={() => router.back()} activeOpacity={0.7} style={styles.backBtn}>
+            <Ionicons name="arrow-back" size={24} color={colors.textPrimary} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Order History</Text>
+          <View style={{ width: 32 }} />
+        </View>
+
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filtersRow}>
+          {FILTERS.map(f => (
+            <TouchableOpacity
+              key={f}
+              style={[styles.filterChip, filter === f && styles.filterChipActive]}
+              onPress={() => setFilter(f)}
+              activeOpacity={0.8}
+            >
+              <Text style={[styles.filterText, filter === f && styles.filterTextActive]}>{f}</Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </SafeAreaView>
+
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
+        {filtered.map(order => (
+          <View key={order.id} style={[styles.orderCard, cardShadow]}>
+            <View style={styles.orderTop}>
+              <View style={styles.orderImg}>
+                <Ionicons name="cafe-outline" size={20} color={colors.brandMuted} />
+              </View>
+              <View style={styles.orderInfo}>
+                <Text style={styles.orderName} numberOfLines={1}>{order.name}</Text>
+                <Text style={styles.orderDate}>{order.date} · {order.type}</Text>
+              </View>
+              <View style={[styles.statusBadge, order.status === 'Cancelled' && styles.statusBadgeCancelled]}>
+                <Text style={[styles.statusText, order.status === 'Cancelled' && styles.statusTextCancelled]}>
+                  {order.status}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.orderBottom}>
+              <Text style={styles.orderTotal}>₱{order.total}.00</Text>
+              <TouchableOpacity style={styles.reorderBtn} activeOpacity={0.8}>
+                <Ionicons name="refresh-outline" size={14} color={colors.brandPrimary} />
+                <Text style={styles.reorderText}>Reorder</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ))}
+
+        {filtered.length === 0 && (
+          <View style={styles.empty}>
+            <Ionicons name="receipt-outline" size={40} color={colors.textDisabled} />
+            <Text style={styles.emptyText}>No {filter.toLowerCase()} orders yet</Text>
+          </View>
+        )}
+      </ScrollView>
+    </View>
+  );
+}
+
+function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
+  return StyleSheet.create({
+    root: { flex: 1, backgroundColor: colors.bgBase },
+    headerRow: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+      paddingHorizontal: Sp[5], paddingVertical: Sp[3],
+    },
+    backBtn: { padding: Sp[1] },
+    headerTitle: { fontSize: FS.headingMd, fontWeight: '700', color: colors.textPrimary },
+    filtersRow: { gap: Sp[2], paddingHorizontal: Sp[5], paddingBottom: Sp[3] },
+    filterChip: {
+      paddingHorizontal: Sp[4], paddingVertical: 8, borderRadius: R.full,
+      borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.bgSurface,
+    },
+    filterChipActive: { borderColor: colors.brandPrimary, backgroundColor: colors.brandPrimary },
+    filterText: { fontSize: FS.label, fontWeight: '500', color: colors.textSecondary },
+    filterTextActive: { color: colors.textInverse, fontWeight: '600' },
+    scroll: { paddingHorizontal: Sp[5], paddingBottom: Sp[8] },
+    orderCard: {
+      backgroundColor: colors.bgSurface, borderRadius: R.lg, padding: Sp[4], marginBottom: Sp[3],
+    },
+    orderTop: { flexDirection: 'row', alignItems: 'center', gap: Sp[3], marginBottom: Sp[3] },
+    orderImg: {
+      width: 44, height: 44, borderRadius: R.md, backgroundColor: colors.bgSubtle,
+      alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+    },
+    orderInfo: { flex: 1 },
+    orderName: { fontSize: FS.body, fontWeight: '600', color: colors.textPrimary, marginBottom: 2 },
+    orderDate: { fontSize: FS.caption, color: colors.textSecondary },
+    statusBadge: {
+      backgroundColor: colors.statusSuccessBg, borderRadius: R.sm, paddingHorizontal: Sp[2], paddingVertical: 3,
+    },
+    statusBadgeCancelled: { backgroundColor: colors.statusErrorBg },
+    statusText: {
+      fontSize: FS.overline, fontWeight: '700', color: colors.statusSuccess,
+      textTransform: 'uppercase', letterSpacing: 0.3,
+    },
+    statusTextCancelled: { color: colors.statusError },
+    orderBottom: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+      borderTopWidth: 1, borderTopColor: colors.bgSubtle, paddingTop: Sp[3],
+    },
+    orderTotal: { fontSize: FS.headingSm, fontWeight: '800', color: colors.textPrimary },
+    reorderBtn: {
+      flexDirection: 'row', alignItems: 'center', gap: 5,
+      backgroundColor: colors.bgSubtle, borderRadius: R.md, paddingHorizontal: Sp[3], paddingVertical: 7,
+    },
+    reorderText: { fontSize: FS.label, color: colors.brandPrimary, fontWeight: '600' },
+    empty: { alignItems: 'center', paddingTop: Sp[12], gap: Sp[3] },
+    emptyText: { fontSize: FS.body, color: colors.textSecondary },
+  });
+}
