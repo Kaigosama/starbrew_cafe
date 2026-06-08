@@ -40,5 +40,6 @@ yarn-error.*
 /ios
 /android
 
+# Claude
 .claude/
 CLAUDE.md
