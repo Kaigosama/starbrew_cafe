@@ -21,9 +21,9 @@ export const C = {
 };
 
 export const CD = {
-  bgBase: '#1C1410',
-  bgSurface: '#261B13',
-  bgSubtle: '#32221A',
+  bgBase: '#4c2e1c',
+  bgSurface: '#5a3824',
+  bgSubtle: '#66422c',
   brandPrimary: '#C9A98A',
   brandSecondary: '#D4B89A',
   brandMuted: '#8B6B4E',
