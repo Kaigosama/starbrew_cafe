@@ -9,18 +9,18 @@ import { useTheme } from '../../context/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authStore';
 
-type Filter = 'All' | 'Pick-up' | 'Delivery';
-const FILTERS: Filter[] = ['All', 'Pick-up', 'Delivery'];
+type Filter = 'All' | 'In-Store' | 'Drive-Thru';
+const FILTERS: Filter[] = ['All', 'In-Store', 'Drive-Thru'];
 
-type OrderItem = { name: string; qty: number };
+type OrderItemRow = { quantity: number; menu_items: { name: string } | null };
 type Order = {
   id: string;
-  queue_num: number;
+  queue_position: number;
   status: string;
-  fulfill: string;
-  total: number;
+  pickup_method: string;
+  total_price: number;
   created_at: string;
-  order_items: OrderItem[];
+  order_items: OrderItemRow[];
 };
 
 function formatDate(iso: string) {
@@ -29,16 +29,21 @@ function formatDate(iso: string) {
   });
 }
 
-function orderDisplayName(items: OrderItem[]) {
+function orderDisplayName(items: OrderItemRow[]) {
   if (!items || items.length === 0) return 'Order';
-  if (items.length === 1) return items[0].name;
-  return `${items[0].name} + ${items.length - 1} more`;
+  const firstName = items[0].menu_items?.name ?? 'Item';
+  if (items.length === 1) return firstName;
+  return `${firstName} + ${items.length - 1} more`;
 }
 
 function statusInfo(status: string) {
-  if (status === 'cancelled') return { text: 'Cancelled', isError: true };
-  if (['completed', 'picked_up'].includes(status)) return { text: 'Completed', isError: false };
+  if (status === 'Cancelled Remake In Progress') return { text: 'Cancelled', isError: true };
+  if (status === 'Picked Up') return { text: 'Completed', isError: false };
   return { text: 'Active', isError: false };
+}
+
+function isFinished(status: string) {
+  return status === 'Picked Up' || status === 'Cancelled Remake In Progress';
 }
 
 export default function OrderHistoryScreen() {
@@ -54,12 +59,13 @@ export default function OrderHistoryScreen() {
     if (!user) return;
     async function fetch() {
       setLoading(true);
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('orders')
-        .select('id, queue_num, status, fulfill, total, created_at, order_items(name, qty)')
-        .eq('user_id', user!.id)
+        .select('id, queue_position, status, pickup_method, total_price, created_at, order_items(quantity, menu_items(name))')
+        .eq('customer_id', user!.id)
         .order('created_at', { ascending: false });
-      if (data) setOrders(data as Order[]);
+      if (error) console.error('order-history fetch error:', error.message);
+      if (data) setOrders(data as unknown as Order[]);
       setLoading(false);
     }
     fetch();
@@ -67,8 +73,8 @@ export default function OrderHistoryScreen() {
 
   const filtered = useMemo(() => {
     if (filter === 'All') return orders;
-    const val = filter === 'Pick-up' ? 'pickup' : 'delivery';
-    return orders.filter(o => o.fulfill === val);
+    const val = filter === 'In-Store' ? 'in-store' : 'drive-thru';
+    return orders.filter(o => o.pickup_method === val);
   }, [orders, filter]);
 
   return (
@@ -112,7 +118,17 @@ export default function OrderHistoryScreen() {
           filtered.map(order => {
             const { text: statusText, isError } = statusInfo(order.status);
             return (
-              <View key={order.id} style={[styles.orderCard, cardShadow]}>
+              <TouchableOpacity
+                key={order.id}
+                style={[styles.orderCard, cardShadow]}
+                activeOpacity={0.8}
+                onPress={() => router.push({
+                  pathname: isFinished(order.status)
+                    ? '/(customer)/order-detail' as any
+                    : '/(customer)/order-status' as any,
+                  params: { id: order.id },
+                })}
+              >
                 <View style={styles.orderTop}>
                   <View style={styles.orderImg}>
                     <Ionicons name="cafe-outline" size={20} color={colors.brandMuted} />
@@ -122,7 +138,7 @@ export default function OrderHistoryScreen() {
                       {orderDisplayName(order.order_items)}
                     </Text>
                     <Text style={styles.orderDate}>
-                      {formatDate(order.created_at)} · {order.fulfill === 'pickup' ? 'Pick-up' : 'Delivery'}
+                      {formatDate(order.created_at)} · {order.pickup_method === 'in-store' ? 'In-Store' : 'Drive-Thru'}
                     </Text>
                   </View>
                   <View style={[styles.statusBadge, isError && styles.statusBadgeCancelled]}>
@@ -132,13 +148,13 @@ export default function OrderHistoryScreen() {
                   </View>
                 </View>
                 <View style={styles.orderBottom}>
-                  <Text style={styles.orderTotal}>₱{order.total}.00</Text>
+                  <Text style={styles.orderTotal}>₱{order.total_price}.00</Text>
                   <TouchableOpacity style={styles.reorderBtn} activeOpacity={0.8}>
                     <Ionicons name="refresh-outline" size={14} color={colors.brandPrimary} />
                     <Text style={styles.reorderText}>Reorder</Text>
                   </TouchableOpacity>
                 </View>
-              </View>
+              </TouchableOpacity>
             );
           })
         )}

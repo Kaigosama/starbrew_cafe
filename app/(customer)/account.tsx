@@ -55,7 +55,7 @@ export default function AccountScreen() {
 
   async function handleSignOut() {
     setSession(null);
-    router.replace('/');
+    router.replace('/(auth)/login');
     await supabase.auth.signOut().catch(() => {});
   }
 

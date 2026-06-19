@@ -2,6 +2,7 @@ import { create } from 'zustand';
 
 export type CartItem = {
   id: string;
+  menuItemId: number;
   name: string;
   price: number;
   size: string;

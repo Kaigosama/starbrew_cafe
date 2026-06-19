@@ -20,7 +20,7 @@ type Category = { id: string; name: string };
 
 const ALL_CHIP = { id: 'all', name: 'All' };
 
-function ItemCard({ item, colors, styles }: { item: MenuItem; colors: any; styles: any }) {
+function ItemCard({ item, isFood, colors, styles }: { item: MenuItem; isFood: boolean; colors: any; styles: any }) {
   const addItem = useCartStore((s) => s.addItem);
   return (
     <TouchableOpacity
@@ -41,9 +41,24 @@ function ItemCard({ item, colors, styles }: { item: MenuItem; colors: any; style
       <TouchableOpacity
         style={styles.addBtn}
         activeOpacity={0.8}
-        onPress={() =>
-          addItem({ id: item.id, name: item.name, price: item.price, size: 'Grande', milk: 'Whole Milk', addOns: [] })
-        }
+        onPress={() => {
+          if (isFood) {
+            addItem({
+              id: item.id,
+              menuItemId: Number(item.id),
+              name: item.name,
+              price: item.price,
+              size: '',
+              milk: '',
+              addOns: [],
+            });
+            return;
+          }
+          router.push({
+            pathname: '/(customer)/item-detail' as any,
+            params: { id: item.id, name: item.name, price: item.price.toString() },
+          });
+        }}
       >
         <Ionicons name="add" size={16} color={colors.textInverse} />
       </TouchableOpacity>
@@ -100,6 +115,7 @@ export default function MenuScreen() {
   }, [allItems, activeCategory, search]);
 
   const chips = [ALL_CHIP, ...categories];
+  const foodCategoryId = categories.find(c => c.name.toLowerCase() === 'food')?.id;
 
   return (
     <View style={styles.root}>
@@ -162,7 +178,13 @@ export default function MenuScreen() {
         ) : (
           <View style={styles.grid}>
             {visibleItems.map(item => (
-              <ItemCard key={item.id} item={item} colors={colors} styles={styles} />
+              <ItemCard
+                key={item.id}
+                item={item}
+                isFood={item.category_id === foodCategoryId}
+                colors={colors}
+                styles={styles}
+              />
             ))}
           </View>
         )}

@@ -1,11 +1,10 @@
 // Rough wait-time estimate for demo purposes — not meant to be precise.
 const BASE_MINUTES: Record<string, number> = {
-  received: 9,
-  crafting: 5,
-  ready: 2,
-  completed: 0,
-  picked_up: 0,
-  cancelled: 0,
+  'Order Received': 9,
+  'Crafting': 5,
+  'Ready for Pickup': 2,
+  'Picked Up': 0,
+  'Cancelled Remake In Progress': 0,
 };
 
 export function estimateWaitMinutes(status: string, itemCount: number = 1): number {

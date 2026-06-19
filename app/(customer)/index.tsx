@@ -29,6 +29,7 @@ export default function HomeScreen() {
   const firstName = user?.user_metadata?.firstName as string | undefined;
 
   const [featured, setFeatured] = useState<FeaturedItem[]>([]);
+  const [storeOpen, setStoreOpen] = useState<boolean | null>(null);
 
   useEffect(() => {
     supabase
@@ -42,6 +43,31 @@ export default function HomeScreen() {
           setFeatured(data.map(d => ({ id: String(d.id), name: d.name, price: d.base_price })));
         }
       });
+  }, []);
+
+  useEffect(() => {
+    supabase
+      .from('store_status')
+      .select('is_open')
+      .eq('id', 1)
+      .single()
+      .then(({ data, error }) => {
+        if (error) console.error('store_status fetch error:', error.message);
+        if (data) setStoreOpen(data.is_open);
+      });
+
+    const channel = supabase
+      .channel('store-status-home')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'store_status' },
+        (payload) => setStoreOpen((payload.new as { is_open: boolean }).is_open)
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   return (
@@ -77,7 +103,21 @@ export default function HomeScreen() {
             </View>
             <View style={styles.infoText}>
               <Text style={styles.infoTitle}>StarBrew Cafe Makati</Text>
-              <Text style={styles.infoDetail}>Open · Closes 10 PM</Text>
+              <View style={styles.statusRow}>
+                {storeOpen !== null && (
+                  <View style={[
+                    styles.statusDot,
+                    { backgroundColor: storeOpen ? colors.statusSuccess : colors.statusError },
+                  ]} />
+                )}
+                <Text style={[
+                  styles.infoDetail,
+                  storeOpen === false && { color: colors.statusError, fontWeight: '600' },
+                  storeOpen === true && { color: colors.statusSuccess, fontWeight: '600' },
+                ]}>
+                  {storeOpen === null ? 'Checking status…' : storeOpen ? 'Open · Accepting orders' : 'Closed · Not accepting orders'}
+                </Text>
+              </View>
               <Text style={styles.infoDetail}>Ayala Ave, Makati City</Text>
             </View>
           </View>
@@ -150,6 +190,8 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
     infoText: { flex: 1, gap: 4 },
     infoTitle: { fontSize: FS.headingSm, fontWeight: '700', color: colors.textPrimary },
     infoDetail: { fontSize: FS.caption, color: colors.textSecondary, lineHeight: 18 },
+    statusRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+    statusDot: { width: 6, height: 6, borderRadius: 3 },
     featuredRow: { flexDirection: 'row', gap: Sp[3] },
     featuredCard: {
       flex: 1, backgroundColor: colors.bgSurface, borderRadius: R.lg,

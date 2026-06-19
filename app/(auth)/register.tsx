@@ -34,11 +34,12 @@ export default function RegisterScreen() {
       return;
     }
     setLoading(true);
+    const fullName = `${firstName} ${lastName}`.trim();
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        data: { firstName, lastName, role: 'customer' },
+        data: { firstName, lastName, full_name: fullName, role: 'customer' },
       },
     });
     setLoading(false);

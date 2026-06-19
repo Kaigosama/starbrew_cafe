@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,9 +19,52 @@ export default function BaristaSettingsScreen() {
   const [deliveryEnabled, setDeliveryEnabled] = useState(true);
   const [notifications, setNotifications] = useState(true);
 
+  useEffect(() => {
+    supabase
+      .from('store_status')
+      .select('is_open, pickup_enabled, delivery_enabled')
+      .eq('id', 1)
+      .single()
+      .then(({ data, error }) => {
+        if (error) {
+          console.error('store_status fetch error:', error.message);
+          return;
+        }
+        if (data) {
+          setStoreOpen(data.is_open);
+          setPickupEnabled(data.pickup_enabled);
+          setDeliveryEnabled(data.delivery_enabled);
+        }
+      });
+  }, []);
+
+  async function persistStoreStatus(next: { is_open?: boolean; pickup_enabled?: boolean; delivery_enabled?: boolean }) {
+    const { error } = await supabase.from('store_status').update(next).eq('id', 1);
+    if (error) console.error('store_status update error:', error.message);
+  }
+
+  function handleToggleStoreOpen(value: boolean) {
+    setStoreOpen(value);
+    // Closing the store automatically closes both order channels;
+    // reopening restores them.
+    setPickupEnabled(value);
+    setDeliveryEnabled(value);
+    persistStoreStatus({ is_open: value, pickup_enabled: value, delivery_enabled: value });
+  }
+
+  function handleTogglePickup(value: boolean) {
+    setPickupEnabled(value);
+    persistStoreStatus({ pickup_enabled: value });
+  }
+
+  function handleToggleDelivery(value: boolean) {
+    setDeliveryEnabled(value);
+    persistStoreStatus({ delivery_enabled: value });
+  }
+
   async function handleSignOut() {
     setSession(null);
-    router.replace('/');
+    router.replace('/(auth)/login');
     await supabase.auth.signOut().catch(() => {});
   }
 
@@ -67,7 +110,7 @@ export default function BaristaSettingsScreen() {
             </View>
             <Switch
               value={storeOpen}
-              onValueChange={setStoreOpen}
+              onValueChange={handleToggleStoreOpen}
               trackColor={{ false: colors.border, true: colors.statusSuccess }}
               thumbColor={colors.bgSurface}
             />
@@ -78,11 +121,12 @@ export default function BaristaSettingsScreen() {
               <View style={styles.switchIcon}>
                 <Ionicons name="storefront-outline" size={18} color={colors.brandSecondary} />
               </View>
-              <Text style={styles.switchLabel}>Pick-up Orders</Text>
+              <Text style={[styles.switchLabel, !storeOpen && styles.switchLabelDisabled]}>In-Store Orders</Text>
             </View>
             <Switch
               value={pickupEnabled}
-              onValueChange={setPickupEnabled}
+              onValueChange={handleTogglePickup}
+              disabled={!storeOpen}
               trackColor={{ false: colors.border, true: colors.brandPrimary }}
               thumbColor={colors.bgSurface}
             />
@@ -91,13 +135,14 @@ export default function BaristaSettingsScreen() {
           <View style={styles.switchRow}>
             <View style={styles.switchLeft}>
               <View style={styles.switchIcon}>
-                <Ionicons name="bicycle-outline" size={18} color={colors.brandSecondary} />
+                <Ionicons name="car-outline" size={18} color={colors.brandSecondary} />
               </View>
-              <Text style={styles.switchLabel}>Delivery Orders</Text>
+              <Text style={[styles.switchLabel, !storeOpen && styles.switchLabelDisabled]}>Drive-Thru Orders</Text>
             </View>
             <Switch
               value={deliveryEnabled}
-              onValueChange={setDeliveryEnabled}
+              onValueChange={handleToggleDelivery}
+              disabled={!storeOpen}
               trackColor={{ false: colors.border, true: colors.brandPrimary }}
               thumbColor={colors.bgSurface}
             />
@@ -200,6 +245,7 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       alignItems: 'center', justifyContent: 'center',
     },
     switchLabel: { fontSize: FS.body, fontWeight: '500', color: colors.textPrimary },
+    switchLabelDisabled: { color: colors.textDisabled },
     switchSub: { fontSize: FS.caption, color: colors.textSecondary, marginTop: 1 },
     divider: { height: 1, backgroundColor: colors.bgSubtle },
     menuRow: {

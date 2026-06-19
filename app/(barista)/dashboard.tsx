@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
@@ -7,34 +7,41 @@ import { router } from 'expo-router';
 import { R, FS, Sp, cardShadow } from '../../constants/theme';
 import { useTheme } from '../../context/ThemeContext';
 import { supabase } from '../../lib/supabase';
+import { estimateWaitMinutes } from '../../lib/eta';
 
-type OrderStatus = 'received' | 'crafting' | 'ready' | 'completed';
-type FulfillType = 'pickup' | 'delivery';
+type OrderStatus = 'Order Received' | 'Crafting' | 'Ready for Pickup' | 'Picked Up' | 'Cancelled Remake In Progress';
+
+type OrderItemRow = { quantity: number; menu_items: { name: string } | null };
+type RawOrder = {
+  id: string;
+  queue_position: number;
+  status: OrderStatus;
+  pickup_method: 'in-store' | 'drive-thru';
+  created_at: string;
+  users: { full_name: string } | null;
+  order_items: OrderItemRow[];
+};
 
 type Order = {
   id: string;
-  queue_num: number;
-  customer_name: string;
-  items: string;
+  queuePosition: number;
   status: OrderStatus;
-  fulfill: FulfillType;
-  created_at: string;
+  pickupMethod: 'in-store' | 'drive-thru';
+  createdAt: string;
+  customerName: string;
+  itemsSummary: string;
+  itemCount: number;
 };
 
 const STATUS_CONFIG: Record<OrderStatus, {
   label: string; color: string; bg: string; action?: string; next?: OrderStatus;
 }> = {
-  received:  { label: 'Received',    color: '#3A6B8A', bg: 'rgba(58,107,138,0.10)', action: 'Start Crafting', next: 'crafting' },
-  crafting:  { label: 'In Progress', color: '#C48A2F', bg: 'rgba(196,138,47,0.12)', action: 'Mark Ready',     next: 'ready' },
-  ready:     { label: 'Ready',       color: '#4A7C59', bg: 'rgba(74,124,89,0.10)',  action: 'Finish',         next: 'completed' },
-  completed: { label: 'Completed',   color: '#B0A099', bg: 'rgba(176,160,153,0.1)' },
+  'Order Received':              { label: 'Received',    color: '#3A6B8A', bg: 'rgba(58,107,138,0.10)', action: 'Start Crafting', next: 'Crafting' },
+  'Crafting':                    { label: 'In Progress', color: '#C48A2F', bg: 'rgba(196,138,47,0.12)', action: 'Mark Ready',     next: 'Ready for Pickup' },
+  'Ready for Pickup':            { label: 'Ready',       color: '#4A7C59', bg: 'rgba(74,124,89,0.10)' },
+  'Picked Up':                   { label: 'Picked Up',   color: '#B0A099', bg: 'rgba(176,160,153,0.1)' },
+  'Cancelled Remake In Progress': { label: 'Cancelled',  color: '#B33A3A', bg: 'rgba(179,58,58,0.10)' },
 };
-
-const FALLBACK_ORDERS: Order[] = [
-  { id: '1', queue_num: 12, customer_name: 'Maria S.', items: 'Cold Brew · Grande',            status: 'received', fulfill: 'pickup',   created_at: new Date().toISOString() },
-  { id: '2', queue_num: 11, customer_name: 'James R.', items: 'Vanilla Latte · Venti',          status: 'crafting', fulfill: 'delivery', created_at: new Date().toISOString() },
-  { id: '3', queue_num: 10, customer_name: 'Ana P.',   items: 'Caramel Frappuccino · Grande',   status: 'ready',    fulfill: 'pickup',   created_at: new Date().toISOString() },
-];
 
 function timeAgo(iso: string) {
   const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
@@ -43,56 +50,74 @@ function timeAgo(iso: string) {
   return `${diff} min`;
 }
 
+function mapOrder(raw: RawOrder): Order {
+  const itemCount = raw.order_items?.length ?? 0;
+  const itemsSummary = (raw.order_items ?? [])
+    .map(oi => oi.menu_items?.name ?? 'Item')
+    .join(', ') || 'No items';
+  const fullName = raw.users?.full_name?.trim();
+  const customerName = fullName || 'Customer';
+
+  return {
+    id: raw.id,
+    queuePosition: raw.queue_position,
+    status: raw.status,
+    pickupMethod: raw.pickup_method,
+    createdAt: raw.created_at,
+    customerName,
+    itemsSummary,
+    itemCount,
+  };
+}
+
 export default function BaristaDashboard() {
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
-  const [orders, setOrders] = useState<Order[]>(FALLBACK_ORDERS);
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
   const [showCompleted, setShowCompleted] = useState(false);
   const [realtimeConnected, setRealtimeConnected] = useState(false);
+
+  const fetchOrders = useCallback(async () => {
+    const { data, error } = await supabase
+      .from('orders')
+      .select('id, queue_position, status, pickup_method, created_at, users(full_name), order_items(quantity, menu_items(name))')
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.error('dashboard fetch error:', error.message);
+      return;
+    }
+    setOrders((data as unknown as RawOrder[]).map(mapOrder));
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
 
-    async function fetchOrders() {
-      const { data, error } = await supabase
-        .from('orders')
-        .select('*')
-        .order('created_at', { ascending: true });
-
-      if (data && !error && isMounted) {
-        setOrders(data as Order[]);
-        setRealtimeConnected(true);
-      }
-    }
-
-    fetchOrders();
+    (async () => {
+      await fetchOrders();
+      if (isMounted) setLoading(false);
+    })();
 
     const channel = supabase
       .channel('orders-realtime')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'orders' },
-        (payload) => {
-          if (!isMounted) return;
-          if (payload.eventType === 'INSERT') {
-            setOrders((prev) => [...prev, payload.new as Order]);
-          } else if (payload.eventType === 'UPDATE') {
-            setOrders((prev) =>
-              prev.map((o) => (o.id === payload.new.id ? (payload.new as Order) : o))
-            );
-          } else if (payload.eventType === 'DELETE') {
-            setOrders((prev) => prev.filter((o) => o.id !== payload.old.id));
-          }
+        () => {
+          if (isMounted) fetchOrders();
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') setRealtimeConnected(true);
+      });
 
     return () => {
       isMounted = false;
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [fetchOrders]);
 
   async function advanceOrder(id: string) {
     const order = orders.find((o) => o.id === id);
@@ -105,12 +130,12 @@ export default function BaristaDashboard() {
       prev.map((o) => (o.id === id ? { ...o, status: next } : o))
     );
 
-    // Persist to Supabase (no-op if table doesn't exist yet)
-    await supabase.from('orders').update({ status: next }).eq('id', id);
+    const nextEta = estimateWaitMinutes(next, order.itemCount || 1);
+    await supabase.from('orders').update({ status: next, estimated_eta_min: nextEta }).eq('id', id);
   }
 
-  const active = orders.filter((o) => o.status !== 'completed');
-  const completed = orders.filter((o) => o.status === 'completed');
+  const active = orders.filter((o) => o.status !== 'Picked Up' && o.status !== 'Cancelled Remake In Progress');
+  const completed = orders.filter((o) => o.status === 'Picked Up' || o.status === 'Cancelled Remake In Progress');
 
   return (
     <View style={styles.root}>
@@ -133,101 +158,120 @@ export default function BaristaDashboard() {
         </View>
       </SafeAreaView>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-        {active.length === 0 && (
-          <View style={styles.empty}>
-            <Ionicons name="checkmark-circle-outline" size={40} color={colors.textDisabled} />
-            <Text style={styles.emptyText}>All caught up!</Text>
-          </View>
-        )}
+      {loading ? (
+        <View style={styles.centered}>
+          <ActivityIndicator color={colors.brandPrimary} size="large" />
+        </View>
+      ) : (
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
+          {active.length === 0 && (
+            <View style={styles.empty}>
+              <Ionicons name="checkmark-circle-outline" size={40} color={colors.textDisabled} />
+              <Text style={styles.emptyText}>All caught up!</Text>
+            </View>
+          )}
 
-        {active.map(order => {
-          const cfg = STATUS_CONFIG[order.status];
-          return (
-            <View key={order.id} style={[styles.orderCard, cardShadow]}>
-              <View style={styles.cardTop}>
-                <View style={styles.customerCol}>
-                  <View style={styles.avatar}>
-                    <Ionicons name="person" size={18} color={colors.brandMuted} />
+          {active.map(order => {
+            const cfg = STATUS_CONFIG[order.status];
+            return (
+              <TouchableOpacity
+                key={order.id}
+                style={[styles.orderCard, cardShadow]}
+                onPress={() => router.push({ pathname: '/(barista)/order-detail', params: { id: order.id } } as any)}
+                activeOpacity={0.85}
+              >
+                <View style={styles.cardTop}>
+                  <View style={styles.customerCol}>
+                    <View style={styles.avatar}>
+                      <Ionicons name="person" size={18} color={colors.brandMuted} />
+                    </View>
+                    <Text style={styles.queueNum}>#{order.queuePosition}</Text>
+                    <Text style={styles.customerName} numberOfLines={1}>{order.customerName}</Text>
                   </View>
-                  <Text style={styles.queueNum}>#{order.queue_num}</Text>
-                  <Text style={styles.customerName} numberOfLines={1}>{order.customer_name}</Text>
+
+                  <View style={styles.detailsCol}>
+                    <Text style={styles.itemsText} numberOfLines={2}>{order.itemsSummary}</Text>
+                    <View style={styles.fulfillRow}>
+                      <Ionicons
+                        name={order.pickupMethod === 'in-store' ? 'storefront-outline' : 'car-outline'}
+                        size={13}
+                        color={colors.textSecondary}
+                      />
+                      <Text style={styles.fulfillText}>
+                        {order.pickupMethod === 'in-store' ? 'In-Store' : 'Drive-Thru'}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.actionCol}>
+                    <View style={[styles.statusBadge, { backgroundColor: cfg.bg }]}>
+                      <Text style={[styles.statusText, { color: cfg.color }]}>{cfg.label}</Text>
+                    </View>
+                    {order.status === 'Ready for Pickup' ? (
+                      <TouchableOpacity
+                        style={[styles.actionBtn, styles.actionBtnReady, styles.actionBtnRow]}
+                        onPress={() => router.push({ pathname: '/(barista)/qr-scanner', params: { orderId: order.id } } as any)}
+                        activeOpacity={0.85}
+                      >
+                        <Ionicons name="qr-code-outline" size={13} color={colors.textInverse} />
+                        <Text style={styles.actionBtnText}>Scan to Confirm</Text>
+                      </TouchableOpacity>
+                    ) : cfg.action && (
+                      <TouchableOpacity
+                        style={styles.actionBtn}
+                        onPress={() => advanceOrder(order.id)}
+                        activeOpacity={0.85}
+                      >
+                        <Text style={styles.actionBtnText}>{cfg.action}</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
                 </View>
 
-                <View style={styles.detailsCol}>
-                  <Text style={styles.itemsText} numberOfLines={2}>{order.items}</Text>
-                  <View style={styles.fulfillRow}>
-                    <Ionicons
-                      name={order.fulfill === 'pickup' ? 'storefront-outline' : 'bicycle-outline'}
-                      size={13}
-                      color={colors.textSecondary}
-                    />
-                    <Text style={styles.fulfillText}>
-                      {order.fulfill === 'pickup' ? 'Pick-up' : 'Delivery'}
-                    </Text>
-                  </View>
+                <View style={styles.cardFooter}>
+                  <Ionicons name="time-outline" size={12} color={colors.textDisabled} />
+                  <Text style={styles.timeAgo}>{timeAgo(order.createdAt)} ago</Text>
                 </View>
+              </TouchableOpacity>
+            );
+          })}
 
-                <View style={styles.actionCol}>
-                  <View style={[styles.statusBadge, { backgroundColor: cfg.bg }]}>
-                    <Text style={[styles.statusText, { color: cfg.color }]}>{cfg.label}</Text>
-                  </View>
-                  {cfg.action && (
-                    <TouchableOpacity
-                      style={[styles.actionBtn, order.status === 'ready' && styles.actionBtnReady]}
-                      onPress={() => advanceOrder(order.id)}
-                      activeOpacity={0.85}
-                    >
-                      <Text style={styles.actionBtnText}>{cfg.action}</Text>
-                    </TouchableOpacity>
-                  )}
-                </View>
+          <TouchableOpacity
+            style={styles.completedHeader}
+            onPress={() => setShowCompleted(v => !v)}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.completedTitle}>Recently Completed ({completed.length})</Text>
+            <Ionicons
+              name={showCompleted ? 'chevron-up' : 'chevron-down'}
+              size={16}
+              color={colors.textSecondary}
+            />
+          </TouchableOpacity>
+
+          {showCompleted && completed.map(order => (
+            <TouchableOpacity
+              key={order.id}
+              style={[styles.completedCard, cardShadow]}
+              onPress={() => router.push({ pathname: '/(barista)/order-detail', params: { id: order.id } } as any)}
+              activeOpacity={0.85}
+            >
+              <View style={styles.completedAvatar}>
+                <Ionicons name="person" size={14} color={colors.brandMuted} />
               </View>
-
-              <View style={styles.cardFooter}>
-                <Ionicons name="time-outline" size={12} color={colors.textDisabled} />
-                <Text style={styles.timeAgo}>{timeAgo(order.created_at)} ago</Text>
+              <View style={styles.completedInfo}>
+                <Text style={styles.completedName}>{order.customerName}</Text>
+                <Text style={styles.completedItems} numberOfLines={1}>{order.itemsSummary}</Text>
               </View>
-            </View>
-          );
-        })}
-
-        <TouchableOpacity
-          style={styles.completedHeader}
-          onPress={() => setShowCompleted(v => !v)}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.completedTitle}>Recently Completed ({completed.length})</Text>
-          <Ionicons
-            name={showCompleted ? 'chevron-up' : 'chevron-down'}
-            size={16}
-            color={colors.textSecondary}
-          />
-        </TouchableOpacity>
-
-        {showCompleted && completed.map(order => (
-          <View key={order.id} style={[styles.completedCard, cardShadow]}>
-            <View style={styles.completedAvatar}>
-              <Ionicons name="person" size={14} color={colors.brandMuted} />
-            </View>
-            <View style={styles.completedInfo}>
-              <Text style={styles.completedName}>{order.customer_name}</Text>
-              <Text style={styles.completedItems} numberOfLines={1}>{order.items}</Text>
-            </View>
-            <View style={[styles.statusBadge, { backgroundColor: colors.bgSubtle }]}>
-              <Text style={[styles.statusText, { color: colors.textDisabled }]}>Done</Text>
-            </View>
-          </View>
-        ))}
-      </ScrollView>
-
-      <TouchableOpacity
-        style={styles.qrFab}
-        onPress={() => router.push('/(barista)/qr-scanner' as any)}
-        activeOpacity={0.9}
-      >
-        <Ionicons name="qr-code-outline" size={22} color={colors.textInverse} />
-      </TouchableOpacity>
+              <View style={[styles.statusBadge, { backgroundColor: colors.bgSubtle }]}>
+                <Text style={[styles.statusText, { color: colors.textDisabled }]}>
+                  {order.status === 'Cancelled Remake In Progress' ? 'Cancelled' : 'Done'}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
     </View>
   );
 }
@@ -250,6 +294,7 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
     },
     liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.statusSuccess },
     liveText: { fontSize: FS.overline, color: colors.statusSuccess, fontWeight: '700' },
+    centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
     scroll: { paddingHorizontal: Sp[5], paddingBottom: 90 },
     empty: { alignItems: 'center', paddingTop: Sp[12], gap: Sp[3] },
     emptyText: { fontSize: FS.body, color: colors.textSecondary },
@@ -276,6 +321,7 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       paddingHorizontal: Sp[3], paddingVertical: 7,
     },
     actionBtnReady: { backgroundColor: colors.statusSuccess },
+    actionBtnRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     actionBtnText: { fontSize: FS.overline, fontWeight: '700', color: colors.textInverse, letterSpacing: 0.2 },
     cardFooter: {
       flexDirection: 'row', alignItems: 'center', gap: 4,
@@ -298,12 +344,5 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
     completedInfo: { flex: 1 },
     completedName: { fontSize: FS.label, fontWeight: '600', color: colors.textPrimary },
     completedItems: { fontSize: FS.caption, color: colors.textSecondary },
-    qrFab: {
-      position: 'absolute', bottom: 80, right: Sp[5], width: 52, height: 52,
-      borderRadius: R.full, backgroundColor: colors.brandPrimary,
-      alignItems: 'center', justifyContent: 'center',
-      shadowColor: colors.brandPrimary, shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.35, shadowRadius: 10, elevation: 6,
-    },
   });
 }

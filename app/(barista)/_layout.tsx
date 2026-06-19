@@ -65,11 +65,13 @@ export default function BaristaLayout() {
     <Tabs
       tabBar={props => <BaristaTabBar {...props} />}
       screenOptions={{ headerShown: false }}
+      backBehavior="history"
     >
       <Tabs.Screen name="dashboard" />
       <Tabs.Screen name="stats" />
       <Tabs.Screen name="settings" />
       <Tabs.Screen name="qr-scanner" options={{ href: null }} />
+      <Tabs.Screen name="order-detail" options={{ href: null }} />
     </Tabs>
   );
 }

@@ -59,15 +59,38 @@ export default function CartScreen() {
               {items.map((item, idx) => (
                 <View key={item.id}>
                   <View style={styles.itemRow}>
-                    <View style={styles.itemImg} />
-                    <View style={styles.itemInfo}>
-                      <Text style={styles.itemName} numberOfLines={2}>{item.name}</Text>
-                      <Text style={styles.itemMeta}>{item.size} · {item.milk}</Text>
-                      {item.addOns.length > 0 && (
-                        <Text style={styles.itemAddOns}>{item.addOns.join(', ')}</Text>
-                      )}
-                      <Text style={styles.itemPrice}>₱{item.price}.00</Text>
-                    </View>
+                    <TouchableOpacity
+                      style={styles.itemTapArea}
+                      activeOpacity={0.7}
+                      onPress={() => {
+                        const addOnsTotal = item.addOns.length * 20;
+                        router.push({
+                          pathname: '/(customer)/item-detail' as any,
+                          params: {
+                            id: String(item.menuItemId),
+                            name: item.name,
+                            price: String(item.price - addOnsTotal),
+                            cartItemId: item.id,
+                            qty: String(item.qty),
+                            size: item.size,
+                            milk: item.milk,
+                            addOns: item.addOns.join(','),
+                          },
+                        });
+                      }}
+                    >
+                      <View style={styles.itemImg} />
+                      <View style={styles.itemInfo}>
+                        <Text style={styles.itemName} numberOfLines={2}>{item.name}</Text>
+                        {item.size && item.milk && (
+                          <Text style={styles.itemMeta}>{item.size} · {item.milk}</Text>
+                        )}
+                        {item.addOns.length > 0 && (
+                          <Text style={styles.itemAddOns}>{item.addOns.join(', ')}</Text>
+                        )}
+                        <Text style={styles.itemPrice}>₱{item.price}.00</Text>
+                      </View>
+                    </TouchableOpacity>
                     <View style={styles.qtyStepper}>
                       <TouchableOpacity
                         style={styles.qtyBtn}
@@ -206,6 +229,12 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       flexDirection: 'row',
       alignItems: 'center',
       paddingVertical: Sp[4],
+      gap: Sp[3],
+    },
+    itemTapArea: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
       gap: Sp[3],
     },
     itemImg: {

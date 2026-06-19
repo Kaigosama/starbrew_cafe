@@ -67,6 +67,7 @@ export default function CustomerLayout() {
     <Tabs
       tabBar={props => <TabBar {...props} />}
       screenOptions={{ headerShown: false }}
+      backBehavior="history"
     >
       <Tabs.Screen name="index" />
       <Tabs.Screen name="menu" />

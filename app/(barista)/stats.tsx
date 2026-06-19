@@ -1,39 +1,135 @@
-import { useMemo } from 'react';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { R, FS, Sp, cardShadow } from '../../constants/theme';
 import { useTheme } from '../../context/ThemeContext';
+import { supabase } from '../../lib/supabase';
 
-const CHART_BARS = [
-  { label: 'Mon', height: 40 },
-  { label: 'Tue', height: 60 },
-  { label: 'Wed', height: 80 },
-  { label: 'Thu', height: 55 },
-  { label: 'Fri', height: 100 },
-  { label: 'Sat', height: 90 },
-  { label: 'Sun', height: 70 },
-];
+type OrderItemRow = { quantity: number; unit_price: number; menu_items: { name: string } | null };
+type Order = {
+  id: string;
+  total_price: number;
+  status: string;
+  estimated_eta_min: number;
+  created_at: string;
+  order_items: OrderItemRow[];
+};
 
-const TOP_ITEMS = [
-  { rank: 1, name: 'Cold Brew',                      count: 12, revenue: 2100 },
-  { rank: 2, name: 'Vanilla Sweet Cream Cold Brew',   count: 9,  revenue: 1755 },
-  { rank: 3, name: 'Caramel Frappuccino',             count: 7,  revenue: 1435 },
-  { rank: 4, name: 'Nitro Cold Brew',                 count: 5,  revenue: 925 },
-  { rank: 5, name: 'Hazelnut Mocha',                  count: 5,  revenue: 925 },
-];
+type DayBar = { label: string; count: number; isToday: boolean };
+type TopItem = { rank: number; name: string; count: number; revenue: number };
 
-const maxHeight = Math.max(...CHART_BARS.map(b => b.height));
+function isSameDay(a: Date, b: Date) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+function todayDateLabel() {
+  return 'Today, ' + new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
 
 export default function StatsScreen() {
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
+  const [loading, setLoading] = useState(true);
+  const [ordersToday, setOrdersToday] = useState(0);
+  const [revenueToday, setRevenueToday] = useState(0);
+  const [avgWait, setAvgWait] = useState<number | null>(null);
+  const [chartBars, setChartBars] = useState<DayBar[]>([]);
+  const [topItems, setTopItems] = useState<TopItem[]>([]);
+
+  const fetchStats = useCallback(async () => {
+      setLoading(true);
+
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const weekStart = new Date(todayStart);
+      weekStart.setDate(weekStart.getDate() - 6);
+
+      const { data, error } = await supabase
+        .from('orders')
+        .select('id, total_price, status, estimated_eta_min, created_at, order_items(quantity, unit_price, menu_items(name))')
+        .gte('created_at', weekStart.toISOString())
+        .order('created_at', { ascending: true });
+
+      if (error) {
+        console.error('stats fetch error:', error.message);
+        setLoading(false);
+        return;
+      }
+
+      const weekOrders = (data ?? []) as unknown as Order[];
+      const active = weekOrders.filter(o => o.status !== 'Cancelled Remake In Progress');
+
+      // Today's metrics
+      const todays = active.filter(o => new Date(o.created_at) >= todayStart);
+      setOrdersToday(todays.length);
+      setRevenueToday(todays.reduce((sum, o) => sum + (o.total_price ?? 0), 0));
+
+      const activeToday = todays.filter(o => o.status !== 'Picked Up');
+      if (activeToday.length > 0) {
+        const totalWait = activeToday.reduce((sum, o) => sum + (o.estimated_eta_min ?? 0), 0);
+        setAvgWait(Math.round(totalWait / activeToday.length));
+      } else {
+        setAvgWait(null);
+      }
+
+      // 7-day order-count chart
+      const bars: DayBar[] = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date(todayStart);
+        d.setDate(d.getDate() - i);
+        const count = active.filter(o => isSameDay(new Date(o.created_at), d)).length;
+        bars.push({
+          label: d.toLocaleDateString('en-US', { weekday: 'short' }),
+          count,
+          isToday: i === 0,
+        });
+      }
+      setChartBars(bars);
+
+      // Top items today
+      const counts = new Map<string, { count: number; revenue: number }>();
+      for (const order of todays) {
+        for (const item of order.order_items ?? []) {
+          const name = item.menu_items?.name ?? 'Item';
+          const entry = counts.get(name) ?? { count: 0, revenue: 0 };
+          entry.count += item.quantity;
+          entry.revenue += item.quantity * item.unit_price;
+          counts.set(name, entry);
+        }
+      }
+      const ranked: TopItem[] = Array.from(counts.entries())
+        .sort((a, b) => b[1].count - a[1].count)
+        .slice(0, 5)
+        .map(([name, v], idx) => ({ rank: idx + 1, name, count: v.count, revenue: v.revenue }));
+      setTopItems(ranked);
+
+      setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    fetchStats();
+
+    const channel = supabase
+      .channel('stats-orders-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => {
+        fetchStats();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchStats]);
+
+  const maxCount = Math.max(1, ...chartBars.map(b => b.count));
+
   const SUMMARY = [
-    { label: 'Orders Today', value: '38',    icon: 'receipt-outline' as const, color: colors.statusInfo },
-    { label: 'Revenue',      value: '₱7,240', icon: 'cash-outline' as const,   color: colors.statusSuccess },
-    { label: 'Avg. Wait',    value: '6 min',  icon: 'time-outline' as const,   color: colors.statusWarning },
+    { label: 'Orders Today', value: String(ordersToday), icon: 'receipt-outline' as const, color: colors.statusInfo },
+    { label: 'Revenue',      value: `₱${revenueToday}.00`, icon: 'cash-outline' as const, color: colors.statusSuccess },
+    { label: 'Avg. Est. Wait', value: avgWait !== null ? `${avgWait} min` : '—', icon: 'time-outline' as const, color: colors.statusWarning },
   ];
 
   return (
@@ -43,64 +139,76 @@ export default function StatsScreen() {
       <SafeAreaView style={styles.headerArea} edges={['top']}>
         <View style={styles.headerRow}>
           <Text style={styles.headerTitle}>Stats</Text>
-          <Text style={styles.headerDate}>Today, Jun 8</Text>
+          <Text style={styles.headerDate}>{todayDateLabel()}</Text>
         </View>
       </SafeAreaView>
 
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-        <View style={styles.summaryRow}>
-          {SUMMARY.map(item => (
-            <View key={item.label} style={[styles.summaryCard, cardShadow]}>
-              <View style={[styles.summaryIcon, { backgroundColor: item.color + '18' }]}>
-                <Ionicons name={item.icon} size={18} color={item.color} />
-              </View>
-              <Text style={styles.summaryValue}>{item.value}</Text>
-              <Text style={styles.summaryLabel}>{item.label}</Text>
-            </View>
-          ))}
+      {loading ? (
+        <View style={styles.centered}>
+          <ActivityIndicator color={colors.brandPrimary} size="large" />
         </View>
-
-        <Text style={styles.sectionLabel}>This Week</Text>
-        <View style={[styles.chartCard, cardShadow]}>
-          <View style={styles.chartBars}>
-            {CHART_BARS.map(bar => {
-              const heightPct = bar.height / maxHeight;
-              const isToday = bar.label === 'Fri';
-              return (
-                <View key={bar.label} style={styles.barCol}>
-                  <View style={styles.barTrack}>
-                    <View style={[
-                      styles.barFill,
-                      { height: `${heightPct * 100}%` },
-                      isToday && styles.barFillActive,
-                    ]} />
-                  </View>
-                  <Text style={[styles.barLabel, isToday && styles.barLabelActive]}>
-                    {bar.label}
-                  </Text>
+      ) : (
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
+          <View style={styles.summaryRow}>
+            {SUMMARY.map(item => (
+              <View key={item.label} style={[styles.summaryCard, cardShadow]}>
+                <View style={[styles.summaryIcon, { backgroundColor: item.color + '18' }]}>
+                  <Ionicons name={item.icon} size={18} color={item.color} />
                 </View>
-              );
-            })}
+                <Text style={styles.summaryValue}>{item.value}</Text>
+                <Text style={styles.summaryLabel}>{item.label}</Text>
+              </View>
+            ))}
           </View>
-        </View>
 
-        <Text style={styles.sectionLabel}>Top Items Today</Text>
-        <View style={[styles.topCard, cardShadow]}>
-          {TOP_ITEMS.map((item, idx) => (
-            <View key={item.rank}>
-              <View style={styles.topRow}>
-                <Text style={styles.topRank}>#{item.rank}</Text>
-                <View style={styles.topInfo}>
-                  <Text style={styles.topName} numberOfLines={1}>{item.name}</Text>
-                  <Text style={styles.topCount}>{item.count} orders</Text>
-                </View>
-                <Text style={styles.topRevenue}>₱{item.revenue}</Text>
-              </View>
-              {idx < TOP_ITEMS.length - 1 && <View style={styles.divider} />}
+          <Text style={styles.sectionLabel}>This Week</Text>
+          <View style={[styles.chartCard, cardShadow]}>
+            <View style={styles.chartBars}>
+              {chartBars.map(bar => {
+                const heightPct = bar.count / maxCount;
+                return (
+                  <View key={bar.label} style={styles.barCol}>
+                    <View style={styles.barTrack}>
+                      <View style={[
+                        styles.barFill,
+                        { height: `${Math.max(heightPct * 100, bar.count > 0 ? 4 : 0)}%` },
+                        bar.isToday && styles.barFillActive,
+                      ]} />
+                    </View>
+                    <Text style={[styles.barLabel, bar.isToday && styles.barLabelActive]}>
+                      {bar.label}
+                    </Text>
+                  </View>
+                );
+              })}
             </View>
-          ))}
-        </View>
-      </ScrollView>
+          </View>
+
+          <Text style={styles.sectionLabel}>Top Items Today</Text>
+          {topItems.length === 0 ? (
+            <View style={[styles.emptyCard, cardShadow]}>
+              <Ionicons name="cafe-outline" size={32} color={colors.textDisabled} />
+              <Text style={styles.emptyText}>No items sold yet today</Text>
+            </View>
+          ) : (
+            <View style={[styles.topCard, cardShadow]}>
+              {topItems.map((item, idx) => (
+                <View key={item.name}>
+                  <View style={styles.topRow}>
+                    <Text style={styles.topRank}>#{item.rank}</Text>
+                    <View style={styles.topInfo}>
+                      <Text style={styles.topName} numberOfLines={1}>{item.name}</Text>
+                      <Text style={styles.topCount}>{item.count} sold</Text>
+                    </View>
+                    <Text style={styles.topRevenue}>₱{item.revenue}</Text>
+                  </View>
+                  {idx < topItems.length - 1 && <View style={styles.divider} />}
+                </View>
+              ))}
+            </View>
+          )}
+        </ScrollView>
+      )}
     </View>
   );
 }
@@ -115,6 +223,7 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
     },
     headerTitle: { fontSize: FS.headingLg, fontWeight: '800', color: colors.textPrimary },
     headerDate: { fontSize: FS.body, color: colors.textSecondary },
+    centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
     scroll: { paddingHorizontal: Sp[5], paddingBottom: Sp[8] },
     summaryRow: { flexDirection: 'row', gap: Sp[3], marginBottom: Sp[5] },
     summaryCard: {
@@ -146,5 +255,10 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
     topCount: { fontSize: FS.caption, color: colors.textSecondary },
     topRevenue: { fontSize: FS.headingSm, fontWeight: '700', color: colors.brandSecondary, flexShrink: 0 },
     divider: { height: 1, backgroundColor: colors.bgSubtle },
+    emptyCard: {
+      backgroundColor: colors.bgSurface, borderRadius: R.lg, padding: Sp[6],
+      alignItems: 'center', gap: Sp[3],
+    },
+    emptyText: { fontSize: FS.body, color: colors.textSecondary },
   });
 }

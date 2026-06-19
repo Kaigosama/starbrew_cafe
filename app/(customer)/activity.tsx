@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -8,22 +8,22 @@ import { R, FS, Sp, cardShadow } from '../../constants/theme';
 import { useTheme } from '../../context/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authStore';
-import { estimateWaitMinutes } from '../../lib/eta';
 
-type OrderItem = { name: string; qty: number; price: number };
+type OrderItemRow = { quantity: number; menu_items: { name: string } | null };
 type Order = {
   id: string;
-  queue_num: number;
+  queue_position: number;
   status: string;
-  total: number;
+  total_price: number;
+  estimated_eta_min: number;
   created_at: string;
-  order_items: OrderItem[];
+  order_items: OrderItemRow[];
 };
 
 const STATUS_LABEL: Record<string, { text: string; color: string; bg: string }> = {
-  received: { text: 'Received',    color: '#3A6B8A', bg: 'rgba(58,107,138,0.10)' },
-  crafting:  { text: 'In Progress', color: '#C48A2F', bg: 'rgba(196,138,47,0.12)' },
-  ready:     { text: 'Ready',       color: '#4A7C59', bg: 'rgba(74,124,89,0.10)' },
+  'Order Received':   { text: 'Received',    color: '#3A6B8A', bg: 'rgba(58,107,138,0.10)' },
+  'Crafting':          { text: 'In Progress', color: '#C48A2F', bg: 'rgba(196,138,47,0.12)' },
+  'Ready for Pickup':  { text: 'Ready',       color: '#4A7C59', bg: 'rgba(74,124,89,0.10)' },
 };
 
 function formatDateTime(iso: string) {
@@ -32,8 +32,8 @@ function formatDateTime(iso: string) {
     '  ·  ' + d.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' });
 }
 
-function firstItemName(items: OrderItem[]) {
-  return items?.[0]?.name ?? 'Order';
+function firstItemName(items: OrderItemRow[]) {
+  return items?.[0]?.menu_items?.name ?? 'Order';
 }
 
 export default function ActivityScreen() {
@@ -45,38 +45,61 @@ export default function ActivityScreen() {
   const [recentOrders, setRecentOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const fetchOrders = useCallback(async () => {
+    if (!user) return;
+
+    // Most recent non-completed order
+    const { data: active, error: activeError } = await supabase
+      .from('orders')
+      .select('id, queue_position, status, total_price, estimated_eta_min, created_at, order_items(quantity, menu_items(name))')
+      .eq('customer_id', user.id)
+      .neq('status', 'Picked Up')
+      .neq('status', 'Cancelled Remake In Progress')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (activeError) console.error('activity active order error:', activeError.message);
+
+    // Recent completed orders
+    const { data: recent, error: recentError } = await supabase
+      .from('orders')
+      .select('id, queue_position, status, total_price, estimated_eta_min, created_at, order_items(quantity, menu_items(name))')
+      .eq('customer_id', user.id)
+      .eq('status', 'Picked Up')
+      .order('created_at', { ascending: false })
+      .limit(5);
+    if (recentError) console.error('activity recent orders error:', recentError.message);
+
+    setActiveOrder(active as Order | null);
+    setRecentOrders((recent ?? []) as Order[]);
+  }, [user]);
+
   useEffect(() => {
     if (!user) return;
-    async function fetchOrders() {
+    let isMounted = true;
+
+    (async () => {
       setLoading(true);
+      await fetchOrders();
+      if (isMounted) setLoading(false);
+    })();
 
-      // Most recent non-completed order
-      const { data: active } = await supabase
-        .from('orders')
-        .select('id, queue_num, status, total, created_at, order_items(name, qty, price)')
-        .eq('user_id', user!.id)
-        .neq('status', 'completed')
-        .neq('status', 'picked_up')
-        .neq('status', 'cancelled')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+    const channel = supabase
+      .channel(`activity-orders-${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'orders', filter: `customer_id=eq.${user.id}` },
+        () => {
+          if (isMounted) fetchOrders();
+        }
+      )
+      .subscribe();
 
-      // Recent completed orders
-      const { data: recent } = await supabase
-        .from('orders')
-        .select('id, queue_num, status, total, created_at, order_items(name, qty, price)')
-        .eq('user_id', user!.id)
-        .in('status', ['completed', 'picked_up'])
-        .order('created_at', { ascending: false })
-        .limit(5);
-
-      setActiveOrder(active as Order | null);
-      setRecentOrders((recent ?? []) as Order[]);
-      setLoading(false);
-    }
-    fetchOrders();
-  }, [user]);
+    return () => {
+      isMounted = false;
+      supabase.removeChannel(channel);
+    };
+  }, [user, fetchOrders]);
 
   return (
     <View style={styles.root}>
@@ -97,7 +120,11 @@ export default function ActivityScreen() {
           <>
             <Text style={styles.sectionLabel}>My Order</Text>
             {activeOrder ? (
-              <View style={[styles.orderCard, cardShadow]}>
+              <TouchableOpacity
+                style={[styles.orderCard, cardShadow]}
+                onPress={() => router.push({ pathname: '/(customer)/order-status' as any, params: { id: activeOrder.id } })}
+                activeOpacity={0.85}
+              >
                 <View style={styles.orderCardTop}>
                   <View style={styles.orderImgPlaceholder}>
                     <Ionicons name="cafe-outline" size={28} color={colors.brandMuted} />
@@ -116,36 +143,28 @@ export default function ActivityScreen() {
                       </View>
                     )}
                     <Text style={styles.etaInline}>
-                      Est. {estimateWaitMinutes(activeOrder.status, activeOrder.order_items?.length || 1)} min
+                      Est. {activeOrder.estimated_eta_min} min
                     </Text>
                   </View>
-                  <Text style={styles.orderCardPrice}>₱{activeOrder.total}.00</Text>
+                  <Text style={styles.orderCardPrice}>₱{activeOrder.total_price}.00</Text>
                 </View>
 
                 <View style={styles.orderCardDivider} />
 
                 <View style={styles.orderCardFooter}>
-                  <TouchableOpacity
-                    style={styles.footerTile}
-                    onPress={() => router.push('/(customer)/order-status' as any)}
-                    activeOpacity={0.8}
-                  >
+                  <View style={styles.footerTile}>
                     <Ionicons name="list-outline" size={18} color={colors.brandPrimary} />
                     <Text style={styles.footerTileLabel}>Queue Number</Text>
-                    <Text style={styles.footerTileValue}>#{activeOrder.queue_num}</Text>
-                  </TouchableOpacity>
+                    <Text style={styles.footerTileValue}>#{activeOrder.queue_position}</Text>
+                  </View>
                   <View style={styles.footerTileSep} />
-                  <TouchableOpacity
-                    style={styles.footerTile}
-                    onPress={() => router.push('/(customer)/order-status' as any)}
-                    activeOpacity={0.8}
-                  >
+                  <View style={styles.footerTile}>
                     <Ionicons name="navigate-outline" size={18} color={colors.brandPrimary} />
-                    <Text style={styles.footerTileLabel}>Order Tracking</Text>
+                    <Text style={styles.footerTileLabel} numberOfLines={1}>View Details & Tracking</Text>
                     <Ionicons name="chevron-forward" size={14} color={colors.textSecondary} />
-                  </TouchableOpacity>
+                  </View>
                 </View>
-              </View>
+              </TouchableOpacity>
             ) : (
               <View style={[styles.emptyOrderCard, cardShadow]}>
                 <Ionicons name="cafe-outline" size={32} color={colors.textDisabled} />
@@ -175,7 +194,11 @@ export default function ActivityScreen() {
                 <View style={[styles.recentCard, cardShadow]}>
                   {recentOrders.map((order, idx) => (
                     <View key={order.id}>
-                      <View style={styles.recentRow}>
+                      <TouchableOpacity
+                        style={styles.recentRow}
+                        onPress={() => router.push({ pathname: '/(customer)/order-detail' as any, params: { id: order.id } })}
+                        activeOpacity={0.8}
+                      >
                         <View style={styles.recentImg} />
                         <View style={styles.recentInfo}>
                           <Text style={styles.recentName} numberOfLines={1}>
@@ -187,8 +210,8 @@ export default function ActivityScreen() {
                             <Ionicons name="arrow-forward" size={12} color={colors.brandPrimary} />
                           </TouchableOpacity>
                         </View>
-                        <Text style={styles.recentPrice}>₱{order.total}.00</Text>
-                      </View>
+                        <Text style={styles.recentPrice}>₱{order.total_price}.00</Text>
+                      </TouchableOpacity>
                       {idx < recentOrders.length - 1 && <View style={styles.divider} />}
                     </View>
                   ))}

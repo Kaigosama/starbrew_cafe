@@ -18,7 +18,7 @@ export default function OrderConfirmationScreen() {
 
   const queue = queueNum ?? '—';
   const count = Number(itemCount) || 1;
-  const eta = estimateWaitMinutes('received', count);
+  const eta = estimateWaitMinutes('Order Received', count);
 
   return (
     <View style={styles.root}>

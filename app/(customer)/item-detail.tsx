@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -7,6 +7,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { R, FS, Sp, cardShadow } from '../../constants/theme';
 import { useTheme } from '../../context/ThemeContext';
 import { useCartStore } from '../../store/cartStore';
+import { supabase } from '../../lib/supabase';
 
 const SIZES = ['Short', 'Tall', 'Grande', 'Venti'] as const;
 type Size = typeof SIZES[number];
@@ -18,16 +19,39 @@ export default function ItemDetailScreen() {
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const addItem = useCartStore((s) => s.addItem);
+  const removeItem = useCartStore((s) => s.removeItem);
 
-  const { id, name, price } = useLocalSearchParams<{ id?: string; name?: string; price?: string }>();
+  const { id, name, price, cartItemId, qty: qtyParam, size: sizeParam, milk: milkParam, addOns: addOnsParam } =
+    useLocalSearchParams<{
+      id?: string; name?: string; price?: string;
+      cartItemId?: string; qty?: string; size?: string; milk?: string; addOns?: string;
+    }>();
   const itemId = id ?? '0';
   const itemName = name ?? 'Cold Brew';
   const basePrice = parseInt(price ?? '175', 10);
+  const isEditing = !!cartItemId;
 
-  const [size, setSize] = useState<Size>('Grande');
-  const [milk, setMilk] = useState('Whole Milk');
-  const [addOns, setAddOns] = useState<string[]>([]);
-  const [qty, setQty] = useState(1);
+  const [size, setSize] = useState<Size>((sizeParam as Size) || 'Grande');
+  const [milk, setMilk] = useState(milkParam || 'Whole Milk');
+  const [addOns, setAddOns] = useState<string[]>(addOnsParam ? addOnsParam.split(',').filter(Boolean) : []);
+  const [qty, setQty] = useState(qtyParam ? parseInt(qtyParam, 10) : 1);
+  const [isFood, setIsFood] = useState(false);
+
+  useEffect(() => {
+    supabase
+      .from('menu_items')
+      .select('categories(name)')
+      .eq('id', itemId)
+      .single()
+      .then(({ data, error }) => {
+        if (error) {
+          console.error('item category fetch error:', error.message);
+          return;
+        }
+        const categoryName = (data?.categories as { name: string } | null)?.name;
+        setIsFood(categoryName?.toLowerCase() === 'food');
+      });
+  }, [itemId]);
 
   function toggleAddOn(opt: string) {
     setAddOns(prev =>
@@ -35,13 +59,29 @@ export default function ItemDetailScreen() {
     );
   }
 
-  const total = (basePrice + addOns.length * 20) * qty;
+  const addOnsTotal = isFood ? 0 : addOns.length * 20;
+  const total = (basePrice + addOnsTotal) * qty;
 
   function handleAddToCart() {
-    for (let i = 0; i < qty; i++) {
-      addItem({ id: itemId, name: itemName, price: basePrice + addOns.length * 20, size, milk, addOns });
+    if (isEditing) {
+      removeItem(cartItemId as string);
     }
-    router.push('/(customer)/cart' as any);
+    for (let i = 0; i < qty; i++) {
+      addItem({
+        id: itemId,
+        menuItemId: Number(itemId),
+        name: itemName,
+        price: basePrice + addOnsTotal,
+        size: isFood ? '' : size,
+        milk: isFood ? '' : milk,
+        addOns: isFood ? [] : addOns,
+      });
+    }
+    if (isEditing) {
+      router.back();
+    } else {
+      router.push('/(customer)/cart' as any);
+    }
   }
 
   return (
@@ -64,7 +104,7 @@ export default function ItemDetailScreen() {
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
         <View style={styles.imgPlaceholder}>
-          <Ionicons name="cafe-outline" size={56} color={colors.brandMuted} />
+          <Ionicons name={isFood ? 'restaurant-outline' : 'cafe-outline'} size={56} color={colors.brandMuted} />
         </View>
 
         <View style={styles.nameRow}>
@@ -76,62 +116,66 @@ export default function ItemDetailScreen() {
           Perfect for any time of day.
         </Text>
 
-        <Text style={styles.optionLabel}>Size</Text>
-        <View style={styles.sizeRow}>
-          {SIZES.map(s => (
-            <TouchableOpacity
-              key={s}
-              style={[styles.sizeBtn, size === s && styles.sizeBtnActive]}
-              onPress={() => setSize(s)}
-              activeOpacity={0.8}
-            >
-              <Text style={[styles.sizeBtnText, size === s && styles.sizeBtnTextActive]}>{s}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <Text style={styles.optionLabel}>Milk</Text>
-        <View style={[styles.optionCard, cardShadow]}>
-          {MILK_OPTIONS.map((opt, idx) => (
-            <View key={opt}>
-              <TouchableOpacity
-                style={styles.radioRow}
-                onPress={() => setMilk(opt)}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.radioLabel}>{opt}</Text>
-                <View style={[styles.radioCircle, milk === opt && styles.radioCircleActive]}>
-                  {milk === opt && <View style={styles.radioDot} />}
-                </View>
-              </TouchableOpacity>
-              {idx < MILK_OPTIONS.length - 1 && <View style={styles.divider} />}
-            </View>
-          ))}
-        </View>
-
-        <Text style={styles.optionLabel}>
-          Add-ons <Text style={styles.optionSub}>(+₱20 each)</Text>
-        </Text>
-        <View style={[styles.optionCard, cardShadow]}>
-          {ADD_ONS.map((opt, idx) => {
-            const checked = addOns.includes(opt);
-            return (
-              <View key={opt}>
+        {!isFood && (
+          <>
+            <Text style={styles.optionLabel}>Size</Text>
+            <View style={styles.sizeRow}>
+              {SIZES.map(s => (
                 <TouchableOpacity
-                  style={styles.radioRow}
-                  onPress={() => toggleAddOn(opt)}
-                  activeOpacity={0.7}
+                  key={s}
+                  style={[styles.sizeBtn, size === s && styles.sizeBtnActive]}
+                  onPress={() => setSize(s)}
+                  activeOpacity={0.8}
                 >
-                  <Text style={styles.radioLabel}>{opt}</Text>
-                  <View style={[styles.checkbox, checked && styles.checkboxActive]}>
-                    {checked && <Ionicons name="checkmark" size={12} color={colors.textInverse} />}
-                  </View>
+                  <Text style={[styles.sizeBtnText, size === s && styles.sizeBtnTextActive]}>{s}</Text>
                 </TouchableOpacity>
-                {idx < ADD_ONS.length - 1 && <View style={styles.divider} />}
-              </View>
-            );
-          })}
-        </View>
+              ))}
+            </View>
+
+            <Text style={styles.optionLabel}>Milk</Text>
+            <View style={[styles.optionCard, cardShadow]}>
+              {MILK_OPTIONS.map((opt, idx) => (
+                <View key={opt}>
+                  <TouchableOpacity
+                    style={styles.radioRow}
+                    onPress={() => setMilk(opt)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.radioLabel}>{opt}</Text>
+                    <View style={[styles.radioCircle, milk === opt && styles.radioCircleActive]}>
+                      {milk === opt && <View style={styles.radioDot} />}
+                    </View>
+                  </TouchableOpacity>
+                  {idx < MILK_OPTIONS.length - 1 && <View style={styles.divider} />}
+                </View>
+              ))}
+            </View>
+
+            <Text style={styles.optionLabel}>
+              Add-ons <Text style={styles.optionSub}>(+₱20 each)</Text>
+            </Text>
+            <View style={[styles.optionCard, cardShadow]}>
+              {ADD_ONS.map((opt, idx) => {
+                const checked = addOns.includes(opt);
+                return (
+                  <View key={opt}>
+                    <TouchableOpacity
+                      style={styles.radioRow}
+                      onPress={() => toggleAddOn(opt)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.radioLabel}>{opt}</Text>
+                      <View style={[styles.checkbox, checked && styles.checkboxActive]}>
+                        {checked && <Ionicons name="checkmark" size={12} color={colors.textInverse} />}
+                      </View>
+                    </TouchableOpacity>
+                    {idx < ADD_ONS.length - 1 && <View style={styles.divider} />}
+                  </View>
+                );
+              })}
+            </View>
+          </>
+        )}
 
         <View style={styles.qtyRow}>
           <Text style={styles.optionLabel}>Quantity</Text>
@@ -161,7 +205,7 @@ export default function ItemDetailScreen() {
           onPress={handleAddToCart}
           activeOpacity={0.85}
         >
-          <Text style={styles.addBtnText}>Add to Cart · ₱{total}.00</Text>
+          <Text style={styles.addBtnText}>{isEditing ? 'Update Cart' : 'Add to Cart'} · ₱{total}.00</Text>
         </TouchableOpacity>
       </SafeAreaView>
     </View>
