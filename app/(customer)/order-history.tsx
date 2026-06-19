@@ -1,29 +1,75 @@
-import { useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { router } from 'expo-router';
 import { R, FS, Sp, cardShadow } from '../../constants/theme';
 import { useTheme } from '../../context/ThemeContext';
+import { supabase } from '../../lib/supabase';
+import { useAuthStore } from '../../store/authStore';
 
 type Filter = 'All' | 'Pick-up' | 'Delivery';
 const FILTERS: Filter[] = ['All', 'Pick-up', 'Delivery'];
 
-const ORDERS = [
-  { id: '1', name: 'Cold Brew + 1 more',              date: 'Apr 26, 2026', total: 370, type: 'Pick-up' as Filter,   status: 'Completed' },
-  { id: '2', name: 'Vanilla Latte',                   date: 'Apr 25, 2026', total: 185, type: 'Delivery' as Filter,  status: 'Completed' },
-  { id: '3', name: 'Caramel Frappuccino + 2 more',    date: 'Apr 22, 2026', total: 615, type: 'Pick-up' as Filter,   status: 'Completed' },
-  { id: '4', name: 'Nitro Cold Brew',                 date: 'Apr 20, 2026', total: 185, type: 'Pick-up' as Filter,   status: 'Cancelled' },
-  { id: '5', name: 'Hazelnut Mocha',                  date: 'Apr 18, 2026', total: 185, type: 'Delivery' as Filter,  status: 'Completed' },
-];
+type OrderItem = { name: string; qty: number };
+type Order = {
+  id: string;
+  queue_num: number;
+  status: string;
+  fulfill: string;
+  total: number;
+  created_at: string;
+  order_items: OrderItem[];
+};
+
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleDateString('en-PH', {
+    month: 'short', day: 'numeric', year: 'numeric',
+  });
+}
+
+function orderDisplayName(items: OrderItem[]) {
+  if (!items || items.length === 0) return 'Order';
+  if (items.length === 1) return items[0].name;
+  return `${items[0].name} + ${items.length - 1} more`;
+}
+
+function statusInfo(status: string) {
+  if (status === 'cancelled') return { text: 'Cancelled', isError: true };
+  if (['completed', 'picked_up'].includes(status)) return { text: 'Completed', isError: false };
+  return { text: 'Active', isError: false };
+}
 
 export default function OrderHistoryScreen() {
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
+  const user = useAuthStore((s) => s.user);
+
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>('All');
 
-  const filtered = filter === 'All' ? ORDERS : ORDERS.filter(o => o.type === filter);
+  useEffect(() => {
+    if (!user) return;
+    async function fetch() {
+      setLoading(true);
+      const { data } = await supabase
+        .from('orders')
+        .select('id, queue_num, status, fulfill, total, created_at, order_items(name, qty)')
+        .eq('user_id', user!.id)
+        .order('created_at', { ascending: false });
+      if (data) setOrders(data as Order[]);
+      setLoading(false);
+    }
+    fetch();
+  }, [user]);
+
+  const filtered = useMemo(() => {
+    if (filter === 'All') return orders;
+    const val = filter === 'Pick-up' ? 'pickup' : 'delivery';
+    return orders.filter(o => o.fulfill === val);
+  }, [orders, filter]);
 
   return (
     <View style={styles.root}>
@@ -53,37 +99,48 @@ export default function OrderHistoryScreen() {
       </SafeAreaView>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-        {filtered.map(order => (
-          <View key={order.id} style={[styles.orderCard, cardShadow]}>
-            <View style={styles.orderTop}>
-              <View style={styles.orderImg}>
-                <Ionicons name="cafe-outline" size={20} color={colors.brandMuted} />
-              </View>
-              <View style={styles.orderInfo}>
-                <Text style={styles.orderName} numberOfLines={1}>{order.name}</Text>
-                <Text style={styles.orderDate}>{order.date} · {order.type}</Text>
-              </View>
-              <View style={[styles.statusBadge, order.status === 'Cancelled' && styles.statusBadgeCancelled]}>
-                <Text style={[styles.statusText, order.status === 'Cancelled' && styles.statusTextCancelled]}>
-                  {order.status}
-                </Text>
-              </View>
-            </View>
-            <View style={styles.orderBottom}>
-              <Text style={styles.orderTotal}>₱{order.total}.00</Text>
-              <TouchableOpacity style={styles.reorderBtn} activeOpacity={0.8}>
-                <Ionicons name="refresh-outline" size={14} color={colors.brandPrimary} />
-                <Text style={styles.reorderText}>Reorder</Text>
-              </TouchableOpacity>
-            </View>
+        {loading ? (
+          <View style={styles.centered}>
+            <ActivityIndicator color={colors.brandPrimary} size="large" />
           </View>
-        ))}
-
-        {filtered.length === 0 && (
+        ) : filtered.length === 0 ? (
           <View style={styles.empty}>
             <Ionicons name="receipt-outline" size={40} color={colors.textDisabled} />
-            <Text style={styles.emptyText}>No {filter.toLowerCase()} orders yet</Text>
+            <Text style={styles.emptyText}>No orders yet</Text>
           </View>
+        ) : (
+          filtered.map(order => {
+            const { text: statusText, isError } = statusInfo(order.status);
+            return (
+              <View key={order.id} style={[styles.orderCard, cardShadow]}>
+                <View style={styles.orderTop}>
+                  <View style={styles.orderImg}>
+                    <Ionicons name="cafe-outline" size={20} color={colors.brandMuted} />
+                  </View>
+                  <View style={styles.orderInfo}>
+                    <Text style={styles.orderName} numberOfLines={1}>
+                      {orderDisplayName(order.order_items)}
+                    </Text>
+                    <Text style={styles.orderDate}>
+                      {formatDate(order.created_at)} · {order.fulfill === 'pickup' ? 'Pick-up' : 'Delivery'}
+                    </Text>
+                  </View>
+                  <View style={[styles.statusBadge, isError && styles.statusBadgeCancelled]}>
+                    <Text style={[styles.statusText, isError && styles.statusTextCancelled]}>
+                      {statusText}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.orderBottom}>
+                  <Text style={styles.orderTotal}>₱{order.total}.00</Text>
+                  <TouchableOpacity style={styles.reorderBtn} activeOpacity={0.8}>
+                    <Ionicons name="refresh-outline" size={14} color={colors.brandPrimary} />
+                    <Text style={styles.reorderText}>Reorder</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+          })
         )}
       </ScrollView>
     </View>
@@ -108,6 +165,9 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
     filterText: { fontSize: FS.label, fontWeight: '500', color: colors.textSecondary },
     filterTextActive: { color: colors.textInverse, fontWeight: '600' },
     scroll: { paddingHorizontal: Sp[5], paddingBottom: Sp[8] },
+    centered: { alignItems: 'center', paddingTop: Sp[12] },
+    empty: { alignItems: 'center', paddingTop: Sp[12], gap: Sp[3] },
+    emptyText: { fontSize: FS.body, color: colors.textSecondary },
     orderCard: {
       backgroundColor: colors.bgSurface, borderRadius: R.lg, padding: Sp[4], marginBottom: Sp[3],
     },
@@ -120,7 +180,8 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
     orderName: { fontSize: FS.body, fontWeight: '600', color: colors.textPrimary, marginBottom: 2 },
     orderDate: { fontSize: FS.caption, color: colors.textSecondary },
     statusBadge: {
-      backgroundColor: colors.statusSuccessBg, borderRadius: R.sm, paddingHorizontal: Sp[2], paddingVertical: 3,
+      backgroundColor: colors.statusSuccessBg, borderRadius: R.sm,
+      paddingHorizontal: Sp[2], paddingVertical: 3,
     },
     statusBadgeCancelled: { backgroundColor: colors.statusErrorBg },
     statusText: {
@@ -135,10 +196,9 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
     orderTotal: { fontSize: FS.headingSm, fontWeight: '800', color: colors.textPrimary },
     reorderBtn: {
       flexDirection: 'row', alignItems: 'center', gap: 5,
-      backgroundColor: colors.bgSubtle, borderRadius: R.md, paddingHorizontal: Sp[3], paddingVertical: 7,
+      backgroundColor: colors.bgSubtle, borderRadius: R.md,
+      paddingHorizontal: Sp[3], paddingVertical: 7,
     },
     reorderText: { fontSize: FS.label, color: colors.brandPrimary, fontWeight: '600' },
-    empty: { alignItems: 'center', paddingTop: Sp[12], gap: Sp[3] },
-    emptyText: { fontSize: FS.body, color: colors.textSecondary },
   });
 }

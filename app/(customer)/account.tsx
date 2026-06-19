@@ -21,13 +21,18 @@ export default function AccountScreen() {
   const { colors, isDark, toggleTheme } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const setSession = useAuthStore((s) => s.setSession);
+  const user = useAuthStore((s) => s.user);
+
+  const firstName = (user?.user_metadata?.firstName as string) ?? '';
+  const lastName = (user?.user_metadata?.lastName as string) ?? '';
+  const displayName = [firstName, lastName].filter(Boolean).join(' ') || 'My Account';
+  const email = user?.email ?? '';
 
   const SECTIONS: Section[] = [
     {
-      title: 'Orders & Rewards',
+      title: 'Orders',
       rows: [
-        { label: 'My Orders',      icon: 'receipt-outline', onPress: () => router.push('/(customer)/order-history' as any) },
-        { label: 'Loyalty Rewards', icon: 'star-outline',   onPress: () => router.push('/(customer)/rewards' as any) },
+        { label: 'My Orders', icon: 'receipt-outline', onPress: () => router.push('/(customer)/order-history' as any) },
       ],
     },
     {
@@ -49,9 +54,9 @@ export default function AccountScreen() {
   ];
 
   async function handleSignOut() {
-    await supabase.auth.signOut();
     setSession(null);
     router.replace('/');
+    await supabase.auth.signOut().catch(() => {});
   }
 
   return (
@@ -61,9 +66,6 @@ export default function AccountScreen() {
       <SafeAreaView style={styles.headerArea} edges={['top']}>
         <View style={styles.headerRow}>
           <Text style={styles.headerTitle}>Account</Text>
-          <TouchableOpacity activeOpacity={0.7}>
-            <Ionicons name="settings-outline" size={24} color={colors.textPrimary} />
-          </TouchableOpacity>
         </View>
       </SafeAreaView>
 
@@ -73,33 +75,12 @@ export default function AccountScreen() {
             <View style={styles.avatar}>
               <Ionicons name="person" size={32} color={colors.brandMuted} />
             </View>
-            <TouchableOpacity style={styles.editBadge} activeOpacity={0.8}>
-              <Ionicons name="pencil" size={11} color={colors.textInverse} />
-            </TouchableOpacity>
           </View>
           <View style={styles.profileInfo}>
-            <Text style={styles.profileName}>Name</Text>
-            <Text style={styles.profileEmail}>user@gmail.com</Text>
+            <Text style={styles.profileName}>{displayName}</Text>
+            <Text style={styles.profileEmail}>{email}</Text>
           </View>
-          <TouchableOpacity activeOpacity={0.7}>
-            <Text style={styles.editProfileText}>Edit</Text>
-          </TouchableOpacity>
         </View>
-
-        <TouchableOpacity
-          style={[styles.rewardsBanner, cardShadow]}
-          onPress={() => router.push('/(customer)/rewards' as any)}
-          activeOpacity={0.85}
-        >
-          <View style={styles.rewardsBannerLeft}>
-            <Ionicons name="star" size={20} color={colors.brandMuted} />
-            <View>
-              <Text style={styles.rewardsBannerTitle}>240 Stars</Text>
-              <Text style={styles.rewardsBannerSub}>Gold Member · 60 to Platinum</Text>
-            </View>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-        </TouchableOpacity>
 
         {SECTIONS.map(section => (
           <View key={section.title} style={styles.sectionGroup}>
@@ -114,11 +95,7 @@ export default function AccountScreen() {
                   >
                     <View style={styles.menuRowLeft}>
                       <View style={styles.menuIconWrap}>
-                        <Ionicons
-                          name={row.icon}
-                          size={18}
-                          color={row.color ?? colors.brandSecondary}
-                        />
+                        <Ionicons name={row.icon} size={18} color={row.color ?? colors.brandSecondary} />
                       </View>
                       <Text style={[styles.menuRowText, row.color && { color: row.color }]}>
                         {row.label}
@@ -157,11 +134,7 @@ export default function AccountScreen() {
           </View>
         </View>
 
-        <TouchableOpacity
-          style={styles.logoutBtn}
-          onPress={handleSignOut}
-          activeOpacity={0.8}
-        >
+        <TouchableOpacity style={styles.logoutBtn} onPress={handleSignOut} activeOpacity={0.8}>
           <Ionicons name="log-out-outline" size={18} color={colors.statusError} />
           <Text style={styles.logoutText}>Sign out</Text>
         </TouchableOpacity>
@@ -182,29 +155,16 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
     scroll: { paddingHorizontal: Sp[5], paddingBottom: Sp[8] },
     profileCard: {
       backgroundColor: colors.bgSurface, borderRadius: R.lg, padding: Sp[4],
-      flexDirection: 'row', alignItems: 'center', gap: Sp[3], marginBottom: Sp[3],
+      flexDirection: 'row', alignItems: 'center', gap: Sp[3], marginBottom: Sp[5],
     },
-    avatarWrap: { position: 'relative' },
+    avatarWrap: {},
     avatar: {
       width: 56, height: 56, borderRadius: R.full, backgroundColor: colors.bgSubtle,
       alignItems: 'center', justifyContent: 'center',
     },
-    editBadge: {
-      position: 'absolute', bottom: 0, right: 0, width: 20, height: 20,
-      borderRadius: R.full, backgroundColor: colors.brandPrimary,
-      alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: colors.bgSurface,
-    },
     profileInfo: { flex: 1 },
     profileName: { fontSize: FS.headingSm, fontWeight: '700', color: colors.textPrimary, marginBottom: 2 },
     profileEmail: { fontSize: FS.caption, color: colors.textSecondary },
-    editProfileText: { fontSize: FS.label, color: colors.brandSecondary, fontWeight: '600' },
-    rewardsBanner: {
-      backgroundColor: colors.bgSurface, borderRadius: R.lg, padding: Sp[4],
-      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: Sp[5],
-    },
-    rewardsBannerLeft: { flexDirection: 'row', alignItems: 'center', gap: Sp[3] },
-    rewardsBannerTitle: { fontSize: FS.headingSm, fontWeight: '700', color: colors.textPrimary, marginBottom: 1 },
-    rewardsBannerSub: { fontSize: FS.caption, color: colors.textSecondary },
     sectionGroup: { marginBottom: Sp[4] },
     sectionTitle: {
       fontSize: FS.overline, fontWeight: '700', color: colors.textSecondary,

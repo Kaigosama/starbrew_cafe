@@ -1,26 +1,68 @@
-import { useMemo } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { router } from 'expo-router';
 import { R, FS, Sp, cardShadow } from '../../constants/theme';
 import { useTheme } from '../../context/ThemeContext';
+import { supabase } from '../../lib/supabase';
+import { useAuthStore } from '../../store/authStore';
+import { estimateWaitMinutes } from '../../lib/eta';
 
 type Step = { id: string; label: string; sublabel: string; icon: keyof typeof Ionicons.glyphMap };
 
 const STEPS: Step[] = [
-  { id: 'received', label: 'Order Received',    sublabel: 'We got your order',       icon: 'checkmark-circle' },
-  { id: 'crafting', label: 'Crafting',           sublabel: 'Your barista is on it',   icon: 'cafe' },
-  { id: 'ready',    label: 'Almost Ready',       sublabel: 'Just a moment more',      icon: 'time' },
-  { id: 'pickup',   label: 'Ready for Pick-up',  sublabel: 'Come grab your drink!',   icon: 'storefront' },
+  { id: 'received', label: 'Order Received',   sublabel: 'We got your order',       icon: 'checkmark-circle' },
+  { id: 'crafting', label: 'Crafting',          sublabel: 'Your barista is on it',   icon: 'cafe' },
+  { id: 'ready',    label: 'Ready for Pick-up', sublabel: 'Come grab your drink!',   icon: 'storefront' },
 ];
 
-const CURRENT_STEP = 1;
+const STEP_INDEX: Record<string, number> = {
+  received: 0, crafting: 1, ready: 2, completed: 3, picked_up: 3,
+};
+
+type OrderItem = { name: string; qty: number };
+type Order = {
+  id: string;
+  queue_num: number;
+  status: string;
+  created_at: string;
+  order_items: OrderItem[];
+};
 
 export default function OrderStatusScreen() {
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
+  const user = useAuthStore((s) => s.user);
+
+  const [order, setOrder] = useState<Order | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!user) return;
+    async function fetchOrder() {
+      setLoading(true);
+      const { data } = await supabase
+        .from('orders')
+        .select('id, queue_num, status, created_at, order_items(name, qty)')
+        .eq('user_id', user!.id)
+        .neq('status', 'completed')
+        .neq('status', 'picked_up')
+        .neq('status', 'cancelled')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      setOrder(data as Order | null);
+      setLoading(false);
+    }
+    fetchOrder();
+  }, [user]);
+
+  const currentStepIdx = order ? (STEP_INDEX[order.status] ?? 0) : 0;
+  const itemCount = order?.order_items?.length || 1;
+  const eta = order ? estimateWaitMinutes(order.status, itemCount) : 0;
+  const firstItemName = order?.order_items?.[0]?.name ?? 'Order';
 
   return (
     <View style={styles.root}>
@@ -36,61 +78,79 @@ export default function OrderStatusScreen() {
         </View>
       </SafeAreaView>
 
-      <View style={styles.body}>
-        <View style={[styles.orderCard, cardShadow]}>
-          <View style={styles.orderCardLeft}>
-            <View style={styles.orderImg}>
-              <Ionicons name="cafe-outline" size={24} color={colors.brandMuted} />
-            </View>
-            <View>
-              <Text style={styles.orderName}>Cold Brew</Text>
-              <Text style={styles.orderMeta}>Grande · Queue #12</Text>
-            </View>
-          </View>
-          <View style={styles.queueBadge}>
-            <Text style={styles.queueNum}>#12</Text>
-          </View>
+      {loading ? (
+        <View style={styles.centered}>
+          <ActivityIndicator color={colors.brandPrimary} size="large" />
         </View>
-
-        <View style={styles.tracker}>
-          {STEPS.map((step, idx) => {
-            const done = idx < CURRENT_STEP;
-            const active = idx === CURRENT_STEP;
-            return (
-              <View key={step.id} style={styles.stepRow}>
-                <View style={styles.stepLeft}>
-                  <View style={[
-                    styles.stepCircle,
-                    done && styles.stepCircleDone,
-                    active && styles.stepCircleActive,
-                  ]}>
-                    <Ionicons
-                      name={done ? 'checkmark' : step.icon}
-                      size={18}
-                      color={done || active ? colors.textInverse : colors.textDisabled}
-                    />
-                  </View>
-                  {idx < STEPS.length - 1 && (
-                    <View style={[styles.stepLine, done && styles.stepLineDone]} />
-                  )}
-                </View>
-                <View style={styles.stepContent}>
-                  <Text style={[styles.stepLabel, active && styles.stepLabelActive]}>
-                    {step.label}
-                  </Text>
-                  {active && <Text style={styles.stepSublabel}>{step.sublabel}</Text>}
-                </View>
+      ) : !order ? (
+        <View style={styles.centered}>
+          <Ionicons name="cafe-outline" size={40} color={colors.textDisabled} />
+          <Text style={styles.emptyText}>No active orders to track</Text>
+          <TouchableOpacity
+            style={styles.orderNowBtn}
+            onPress={() => router.push('/(customer)/menu' as any)}
+            activeOpacity={0.85}
+          >
+            <Text style={styles.orderNowText}>Order now</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <View style={styles.body}>
+          <View style={[styles.orderCard, cardShadow]}>
+            <View style={styles.orderCardLeft}>
+              <View style={styles.orderImg}>
+                <Ionicons name="cafe-outline" size={24} color={colors.brandMuted} />
               </View>
-            );
-          })}
-        </View>
+              <View>
+                <Text style={styles.orderName}>{firstItemName}</Text>
+                <Text style={styles.orderMeta}>Queue #{order.queue_num}</Text>
+              </View>
+            </View>
+            <View style={styles.queueBadge}>
+              <Text style={styles.queueNum}>#{order.queue_num}</Text>
+            </View>
+          </View>
 
-        <View style={[styles.etaCard, cardShadow]}>
-          <Ionicons name="time-outline" size={20} color={colors.brandPrimary} />
-          <Text style={styles.etaText}>Estimated wait: </Text>
-          <Text style={styles.etaValue}>~5 minutes</Text>
+          <View style={styles.tracker}>
+            {STEPS.map((step, idx) => {
+              const done = idx < currentStepIdx;
+              const active = idx === currentStepIdx;
+              return (
+                <View key={step.id} style={styles.stepRow}>
+                  <View style={styles.stepLeft}>
+                    <View style={[
+                      styles.stepCircle,
+                      done && styles.stepCircleDone,
+                      active && styles.stepCircleActive,
+                    ]}>
+                      <Ionicons
+                        name={done ? 'checkmark' : step.icon}
+                        size={18}
+                        color={done || active ? colors.textInverse : colors.textDisabled}
+                      />
+                    </View>
+                    {idx < STEPS.length - 1 && (
+                      <View style={[styles.stepLine, done && styles.stepLineDone]} />
+                    )}
+                  </View>
+                  <View style={styles.stepContent}>
+                    <Text style={[styles.stepLabel, active && styles.stepLabelActive]}>
+                      {step.label}
+                    </Text>
+                    {active && <Text style={styles.stepSublabel}>{step.sublabel}</Text>}
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+
+          <View style={[styles.etaCard, cardShadow]}>
+            <Ionicons name="time-outline" size={20} color={colors.brandPrimary} />
+            <Text style={styles.etaText}>Estimated wait: </Text>
+            <Text style={styles.etaValue}>~{eta} minutes</Text>
+          </View>
         </View>
-      </View>
+      )}
     </View>
   );
 }
@@ -104,6 +164,13 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
     },
     backBtn: { padding: Sp[1] },
     headerTitle: { fontSize: FS.headingMd, fontWeight: '700', color: colors.textPrimary },
+    centered: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: Sp[3], paddingHorizontal: Sp[5] },
+    emptyText: { fontSize: FS.body, color: colors.textSecondary },
+    orderNowBtn: {
+      backgroundColor: colors.brandPrimary, borderRadius: R.md,
+      paddingHorizontal: Sp[5], paddingVertical: 10,
+    },
+    orderNowText: { fontSize: FS.label, fontWeight: '700', color: colors.textInverse },
     body: { flex: 1, paddingHorizontal: Sp[5] },
     orderCard: {
       backgroundColor: colors.bgSurface, borderRadius: R.lg, padding: Sp[4],

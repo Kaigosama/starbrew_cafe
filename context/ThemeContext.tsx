@@ -8,12 +8,14 @@ interface ThemeContextValue {
   colors: Colors;
   isDark: boolean;
   toggleTheme: () => void;
+  setDarkMode: (dark: boolean) => void;
 }
 
 const ThemeContext = createContext<ThemeContextValue>({
   colors: C,
   isDark: false,
   toggleTheme: () => {},
+  setDarkMode: () => {},
 });
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
@@ -25,8 +27,12 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     setManualDark(prev => !(prev !== null ? prev : scheme === 'dark'));
   }
 
+  function setDarkMode(dark: boolean) {
+    setManualDark(dark);
+  }
+
   return (
-    <ThemeContext.Provider value={{ colors: isDark ? CD : C, isDark, toggleTheme }}>
+    <ThemeContext.Provider value={{ colors: isDark ? CD : C, isDark, toggleTheme, setDarkMode }}>
       {children}
     </ThemeContext.Provider>
   );

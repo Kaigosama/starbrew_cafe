@@ -20,9 +20,9 @@ export default function BaristaSettingsScreen() {
   const [notifications, setNotifications] = useState(true);
 
   async function handleSignOut() {
-    await supabase.auth.signOut();
     setSession(null);
     router.replace('/');
+    await supabase.auth.signOut().catch(() => {});
   }
 
   return (

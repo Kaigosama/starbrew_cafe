@@ -1,23 +1,30 @@
 import { useMemo, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { R, FS, Sp, cardShadow } from '../../constants/theme';
 import { useTheme } from '../../context/ThemeContext';
 
-type Role = 'customer' | 'barista';
+type Mode = 'light' | 'dark';
 
-const ROLES: { id: Role; label: string; desc: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-  { id: 'customer', label: 'Customer', desc: 'Browse the menu & place orders', icon: 'cafe-outline' },
-  { id: 'barista',  label: 'Barista',  desc: 'Manage orders & the queue',     icon: 'person-outline' },
+const MODES: { id: Mode; label: string; desc: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { id: 'light', label: 'Light Mode', desc: 'Bright & classic',  icon: 'sunny-outline' },
+  { id: 'dark',  label: 'Dark Mode',  desc: 'Easy on the eyes',  icon: 'moon-outline' },
 ];
 
-export default function RoleSelectScreen() {
-  const { colors, isDark } = useTheme();
+export default function ThemeSelectScreen() {
+  const { colors, isDark, setDarkMode } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const [selected, setSelected] = useState<Role | null>(null);
+  const { role } = useLocalSearchParams<{ role?: string }>();
+
+  const [selected, setSelected] = useState<Mode>(isDark ? 'dark' : 'light');
+
+  function handleSelect(mode: Mode) {
+    setSelected(mode);
+    setDarkMode(mode === 'dark');
+  }
 
   return (
     <View style={styles.root}>
@@ -30,31 +37,31 @@ export default function RoleSelectScreen() {
         </View>
 
         <View style={styles.body}>
-          <Text style={styles.title}>I am a…</Text>
-          <Text style={styles.subtitle}>Choose your role to continue</Text>
+          <Text style={styles.title}>Pick your look</Text>
+          <Text style={styles.subtitle}>You can change this anytime in Account settings</Text>
 
           <View style={styles.cards}>
-            {ROLES.map(role => {
-              const active = selected === role.id;
+            {MODES.map(mode => {
+              const active = selected === mode.id;
               return (
                 <TouchableOpacity
-                  key={role.id}
+                  key={mode.id}
                   style={[styles.card, active && styles.cardActive]}
-                  onPress={() => setSelected(role.id)}
+                  onPress={() => handleSelect(mode.id)}
                   activeOpacity={0.85}
                 >
                   <View style={[styles.iconCircle, active && styles.iconCircleActive]}>
                     <Ionicons
-                      name={role.icon}
+                      name={mode.icon}
                       size={30}
                       color={active ? colors.textInverse : colors.brandPrimary}
                     />
                   </View>
-                  <Text style={[styles.roleLabel, active && styles.roleLabelActive]}>
-                    {role.label}
+                  <Text style={[styles.modeLabel, active && styles.modeLabelActive]}>
+                    {mode.label}
                   </Text>
-                  <Text style={[styles.roleDesc, active && styles.roleDescActive]}>
-                    {role.desc}
+                  <Text style={[styles.modeDesc, active && styles.modeDescActive]}>
+                    {mode.desc}
                   </Text>
                 </TouchableOpacity>
               );
@@ -64,13 +71,9 @@ export default function RoleSelectScreen() {
 
         <View style={styles.footer}>
           <TouchableOpacity
-            style={[styles.continueBtn, !selected && styles.continueBtnDisabled]}
-            onPress={() =>
-              selected &&
-              router.push({ pathname: '/(auth)/theme-select', params: { role: selected } })
-            }
+            style={[styles.continueBtn, cardShadow]}
+            onPress={() => router.push({ pathname: '/(auth)/signin', params: { role } })}
             activeOpacity={0.85}
-            disabled={!selected}
           >
             <Text style={styles.continueBtnText}>Continue</Text>
           </TouchableOpacity>
@@ -121,20 +124,20 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       marginBottom: Sp[3],
     },
     iconCircleActive: { backgroundColor: colors.brandPrimary },
-    roleLabel: {
+    modeLabel: {
       fontSize: FS.headingMd,
       fontWeight: '700',
       color: colors.textPrimary,
       marginBottom: Sp[1],
     },
-    roleLabelActive: { color: colors.brandPrimary },
-    roleDesc: {
+    modeLabelActive: { color: colors.brandPrimary },
+    modeDesc: {
       fontSize: FS.caption,
       color: colors.textSecondary,
       textAlign: 'center',
       lineHeight: 17,
     },
-    roleDescActive: { color: colors.brandSecondary },
+    modeDescActive: { color: colors.brandSecondary },
     footer: { paddingHorizontal: Sp[5], paddingBottom: Sp[8] },
     continueBtn: {
       backgroundColor: colors.brandPrimary,
@@ -142,7 +145,6 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       paddingVertical: 16,
       alignItems: 'center',
     },
-    continueBtnDisabled: { opacity: 0.35 },
     continueBtnText: {
       color: colors.textInverse,
       fontSize: FS.bodyLg,

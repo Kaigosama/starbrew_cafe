@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
@@ -7,6 +7,8 @@ import { router } from 'expo-router';
 import { R, FS, Sp, cardShadow } from '../../constants/theme';
 import { useTheme } from '../../context/ThemeContext';
 import { useCartStore } from '../../store/cartStore';
+import { useAuthStore } from '../../store/authStore';
+import { supabase } from '../../lib/supabase';
 
 type FulfillType = 'pickup' | 'delivery';
 type TipOption = 0 | 10 | 15 | 20;
@@ -16,18 +18,88 @@ export default function CheckoutScreen() {
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const items = useCartStore((s) => s.items);
   const clear = useCartStore((s) => s.clear);
+  const user = useAuthStore((s) => s.user);
 
   const [fulfill, setFulfill] = useState<FulfillType>('pickup');
   const [tip, setTip] = useState<TipOption>(0);
+  const [loading, setLoading] = useState(false);
+  const [paymentModalVisible, setPaymentModalVisible] = useState(false);
 
   const subtotal = items.reduce((s, i) => s + i.price * i.qty, 0);
   const fee = 15;
   const tipAmount = Math.round(subtotal * tip / 100);
   const total = subtotal + fee + tipAmount;
 
-  function handleConfirm() {
+  function handleOpenPayment() {
+    if (items.length === 0) return;
+    setPaymentModalVisible(true);
+  }
+
+  async function handlePaymentResult(success: boolean) {
+    setPaymentModalVisible(false);
+    if (!success) {
+      Alert.alert('Payment Failed', 'Your mock payment could not be processed. Please try again.');
+      return;
+    }
+    await placeOrder();
+  }
+
+  async function placeOrder() {
+    setLoading(true);
+
+    // Generate queue number from total order count
+    const { count } = await supabase
+      .from('orders')
+      .select('id', { count: 'exact', head: true });
+    const queueNum = ((count ?? 0) % 99) + 1;
+
+    // Build customer display name
+    const firstName = (user?.user_metadata?.firstName as string) ?? 'Customer';
+    const lastInitial = (user?.user_metadata?.lastName as string)?.[0] ?? '';
+    const customerName = lastInitial ? `${firstName} ${lastInitial}.` : firstName;
+
+    // Build items summary for barista display
+    const itemsSummary = items.map(i => `${i.name} · ${i.size}`).join(', ');
+
+    // Insert order
+    const { data: order, error: orderError } = await supabase
+      .from('orders')
+      .insert({
+        user_id: user?.id,
+        queue_num: queueNum,
+        customer_name: customerName,
+        items: itemsSummary,
+        status: 'received',
+        fulfill,
+        total,
+      })
+      .select('id')
+      .single();
+
+    if (orderError || !order) {
+      setLoading(false);
+      Alert.alert('Order failed', orderError?.message ?? 'Could not place your order. Please try again.');
+      return;
+    }
+
+    // Insert order items
+    await supabase.from('order_items').insert(
+      items.map(item => ({
+        order_id: order.id,
+        name: item.name,
+        price: item.price,
+        qty: item.qty,
+        customizations: { size: item.size, milk: item.milk, addOns: item.addOns },
+      }))
+    );
+
+    const itemCount = items.length;
+    setLoading(false);
     clear();
-    router.replace('/(customer)/order-confirmation' as any);
+    router.replace({
+      pathname: '/(customer)/order-confirmation' as any,
+      params: { queueNum: queueNum.toString(), itemCount: itemCount.toString(), total: total.toString() },
+    });
   }
 
   return (
@@ -103,13 +175,12 @@ export default function CheckoutScreen() {
 
         <Text style={styles.sectionLabel}>Payment</Text>
         <View style={[styles.card, cardShadow]}>
-          <TouchableOpacity style={styles.paymentRow} activeOpacity={0.7}>
+          <View style={styles.paymentRow}>
             <View style={styles.paymentLeft}>
               <Ionicons name="card-outline" size={20} color={colors.brandSecondary} />
-              <Text style={styles.paymentLabel}>GCash · •••• 1234</Text>
+              <Text style={styles.paymentLabel}>GCash · Mock Payment</Text>
             </View>
-            <Ionicons name="chevron-forward" size={16} color={colors.textDisabled} />
-          </TouchableOpacity>
+          </View>
         </View>
 
         <View style={[styles.summaryCard, cardShadow]}>
@@ -137,13 +208,62 @@ export default function CheckoutScreen() {
 
       <SafeAreaView edges={['bottom']} style={styles.footerArea}>
         <TouchableOpacity
-          style={styles.confirmBtn}
-          onPress={handleConfirm}
+          style={[styles.confirmBtn, loading && styles.confirmBtnDisabled]}
+          onPress={handleOpenPayment}
           activeOpacity={0.85}
+          disabled={loading}
         >
-          <Text style={styles.confirmBtnText}>Confirm Order · ₱{total}.00</Text>
+          <Text style={styles.confirmBtnText}>
+            {loading ? 'Placing order…' : `Proceed to Payment · ₱${total}.00`}
+          </Text>
         </TouchableOpacity>
       </SafeAreaView>
+
+      <Modal
+        visible={paymentModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPaymentModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, cardShadow]}>
+            <View style={styles.modalIconWrap}>
+              <Ionicons name="card-outline" size={28} color={colors.brandPrimary} />
+            </View>
+            <Text style={styles.modalTitle}>Mock Payment</Text>
+            <Text style={styles.modalSubtitle}>
+              This is a simulated GCash payment for demo purposes. No real money is charged.
+            </Text>
+            <Text style={styles.modalAmount}>₱{total}.00</Text>
+
+            <TouchableOpacity
+              style={styles.modalSuccessBtn}
+              onPress={() => handlePaymentResult(true)}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="checkmark-circle-outline" size={18} color={colors.textInverse} />
+              <Text style={styles.modalSuccessBtnText}>Simulate Successful Payment</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.modalFailBtn}
+              onPress={() => handlePaymentResult(false)}
+              activeOpacity={0.85}
+            >
+              <Ionicons name="close-circle-outline" size={18} color={colors.statusError} />
+              <Text style={styles.modalFailBtnText}>Simulate Failed Payment</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.modalCancelBtn}
+              onPress={() => setPaymentModalVisible(false)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.modalCancelBtnText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -209,6 +329,41 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
     confirmBtn: {
       backgroundColor: colors.brandPrimary, borderRadius: R.md, paddingVertical: 15, alignItems: 'center',
     },
+    confirmBtnDisabled: { opacity: 0.6 },
     confirmBtnText: { color: colors.textInverse, fontSize: FS.bodyLg, fontWeight: '700' },
+    modalOverlay: {
+      flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', alignItems: 'center', justifyContent: 'center',
+      paddingHorizontal: Sp[5],
+    },
+    modalCard: {
+      width: '100%', backgroundColor: colors.bgSurface, borderRadius: R.xl,
+      padding: Sp[6], alignItems: 'center',
+    },
+    modalIconWrap: {
+      width: 56, height: 56, borderRadius: R.full, backgroundColor: colors.bgSubtle,
+      alignItems: 'center', justifyContent: 'center', marginBottom: Sp[3],
+    },
+    modalTitle: { fontSize: FS.headingMd, fontWeight: '700', color: colors.textPrimary, marginBottom: Sp[2] },
+    modalSubtitle: {
+      fontSize: FS.caption, color: colors.textSecondary, textAlign: 'center',
+      lineHeight: 18, marginBottom: Sp[4],
+    },
+    modalAmount: {
+      fontSize: FS.display, fontWeight: '800', color: colors.brandPrimary, marginBottom: Sp[5],
+    },
+    modalSuccessBtn: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Sp[2],
+      backgroundColor: colors.statusSuccess, borderRadius: R.md,
+      paddingVertical: 14, width: '100%', marginBottom: Sp[3],
+    },
+    modalSuccessBtnText: { color: colors.textInverse, fontSize: FS.body, fontWeight: '700' },
+    modalFailBtn: {
+      flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Sp[2],
+      borderWidth: 1.5, borderColor: colors.statusError, borderRadius: R.md,
+      paddingVertical: 14, width: '100%', marginBottom: Sp[3],
+    },
+    modalFailBtnText: { color: colors.statusError, fontSize: FS.body, fontWeight: '700' },
+    modalCancelBtn: { paddingVertical: Sp[2] },
+    modalCancelBtnText: { color: colors.textSecondary, fontSize: FS.body, fontWeight: '500' },
   });
 }

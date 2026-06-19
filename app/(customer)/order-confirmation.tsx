@@ -3,13 +3,22 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { R, FS, Sp, cardShadow } from '../../constants/theme';
 import { useTheme } from '../../context/ThemeContext';
+import { estimateWaitMinutes } from '../../lib/eta';
 
 export default function OrderConfirmationScreen() {
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
+
+  const { queueNum, itemCount, total } = useLocalSearchParams<{
+    queueNum?: string; itemCount?: string; total?: string;
+  }>();
+
+  const queue = queueNum ?? '—';
+  const count = Number(itemCount) || 1;
+  const eta = estimateWaitMinutes('received', count);
 
   return (
     <View style={styles.root}>
@@ -31,32 +40,28 @@ export default function OrderConfirmationScreen() {
           <View style={[styles.infoCard, cardShadow]}>
             <View style={styles.infoRow}>
               <View style={styles.infoItem}>
-                <Text style={styles.infoLabel}>Order Number</Text>
-                <Text style={styles.infoValue}>#SB-2048</Text>
+                <Text style={styles.infoLabel}>Queue</Text>
+                <Text style={styles.infoValue}>#{queue}</Text>
               </View>
               <View style={styles.infoSep} />
               <View style={styles.infoItem}>
-                <Text style={styles.infoLabel}>Queue</Text>
-                <Text style={styles.infoValue}>#12</Text>
+                <Text style={styles.infoLabel}>Items</Text>
+                <Text style={styles.infoValue}>{count}</Text>
               </View>
               <View style={styles.infoSep} />
               <View style={styles.infoItem}>
                 <Text style={styles.infoLabel}>Est. Wait</Text>
-                <Text style={styles.infoValue}>8 min</Text>
+                <Text style={styles.infoValue}>{eta} min</Text>
               </View>
             </View>
           </View>
 
-          <View style={[styles.summaryCard, cardShadow]}>
-            <View style={styles.summaryRow}>
-              <View style={styles.summaryItemImg} />
-              <View style={styles.summaryItemInfo}>
-                <Text style={styles.summaryItemName}>Cold Brew</Text>
-                <Text style={styles.summaryItemMeta}>Grande · Whole Milk</Text>
-              </View>
-              <Text style={styles.summaryItemPrice}>₱175.00</Text>
+          {total && (
+            <View style={[styles.summaryCard, cardShadow]}>
+              <Text style={styles.summaryLabel}>Total Paid</Text>
+              <Text style={styles.summaryAmount}>₱{total}.00</Text>
             </View>
-          </View>
+          )}
         </View>
 
         <View style={styles.footer}>
@@ -112,14 +117,10 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
     infoSep: { width: 1, height: 36, backgroundColor: colors.bgSubtle },
     summaryCard: {
       backgroundColor: colors.bgSurface, borderRadius: R.lg,
-      padding: Sp[4], width: '100%',
+      padding: Sp[4], width: '100%', alignItems: 'center',
     },
-    summaryRow: { flexDirection: 'row', alignItems: 'center', gap: Sp[3] },
-    summaryItemImg: { width: 44, height: 44, borderRadius: R.md, backgroundColor: colors.bgSubtle },
-    summaryItemInfo: { flex: 1 },
-    summaryItemName: { fontSize: FS.body, fontWeight: '600', color: colors.textPrimary, marginBottom: 2 },
-    summaryItemMeta: { fontSize: FS.caption, color: colors.textSecondary },
-    summaryItemPrice: { fontSize: FS.body, fontWeight: '700', color: colors.brandSecondary },
+    summaryLabel: { fontSize: FS.caption, color: colors.textSecondary, marginBottom: 4 },
+    summaryAmount: { fontSize: FS.headingMd, fontWeight: '800', color: colors.textPrimary },
     footer: { paddingHorizontal: Sp[5], paddingBottom: Sp[8], gap: Sp[3] },
     trackBtn: {
       backgroundColor: colors.brandPrimary, borderRadius: R.md, paddingVertical: 15,
