@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
@@ -18,23 +18,30 @@ const STATUS_CONFIG: Record<OrderStatus, { label: string; color: string; bg: str
   'Cancelled Remake In Progress': { label: 'Cancelled',  color: '#B33A3A', bg: 'rgba(179,58,58,0.10)',  icon: 'close-circle-outline' },
 };
 
-type Customizations = { size?: string; milk?: string; addOns?: string[] } | null;
+type Customizations = { size?: string; milk?: string; addOns?: string[]; temperature?: string } | null;
 type OrderItemRow = {
   quantity: number;
   unit_price: number;
   customizations: Customizations;
-  menu_items: { name: string } | null;
+  menu_items: { name: string; image_url: string | null; image_url_cold: string | null } | null;
 };
 type Order = {
   id: string;
   queue_position: number;
   status: OrderStatus;
   pickup_method: string;
+  payment_method: string | null;
   total_price: number;
   created_at: string;
   users: { full_name: string } | null;
   order_items: OrderItemRow[];
 };
+
+function paymentLabel(method: string | null) {
+  if (method === 'gcash') return 'GCash';
+  if (method === 'cash') return 'Cash';
+  return 'Not specified';
+}
 
 function formatDateTime(iso: string) {
   const d = new Date(iso);
@@ -43,8 +50,15 @@ function formatDateTime(iso: string) {
 }
 
 function itemSubtitle(item: OrderItemRow) {
-  const parts = [item.customizations?.size, item.customizations?.milk].filter(Boolean);
+  const parts = [item.customizations?.temperature, item.customizations?.size, item.customizations?.milk].filter(Boolean);
   return parts.length ? `${parts.join(' · ')} · Qty ${item.quantity}` : `Qty ${item.quantity}`;
+}
+
+function itemImageUrl(item: OrderItemRow) {
+  if (item.customizations?.temperature === 'Cold' && item.menu_items?.image_url_cold) {
+    return item.menu_items.image_url_cold;
+  }
+  return item.menu_items?.image_url ?? null;
 }
 
 export default function BaristaOrderDetailScreen() {
@@ -61,7 +75,7 @@ export default function BaristaOrderDetailScreen() {
       setLoading(true);
       const { data, error } = await supabase
         .from('orders')
-        .select('id, queue_position, status, pickup_method, total_price, created_at, users(full_name), order_items(quantity, unit_price, customizations, menu_items(name))')
+        .select('id, queue_position, status, pickup_method, payment_method, total_price, created_at, users(full_name), order_items(quantity, unit_price, customizations, menu_items(name, image_url, image_url_cold))')
         .eq('id', id)
         .maybeSingle();
       if (error) console.error('barista order-detail fetch error:', error.message);
@@ -122,6 +136,11 @@ export default function BaristaOrderDetailScreen() {
                 {order.pickup_method === 'in-store' ? 'In-Store' : 'Drive-Thru'}
               </Text>
             </View>
+            <View style={styles.divider} />
+            <View style={styles.infoRow}>
+              <Text style={styles.infoLabel}>Payment</Text>
+              <Text style={styles.infoValue}>{paymentLabel(order.payment_method)}</Text>
+            </View>
           </View>
 
           <Text style={styles.sectionLabel}>Items</Text>
@@ -129,9 +148,13 @@ export default function BaristaOrderDetailScreen() {
             {(order.order_items ?? []).map((item, idx) => (
               <View key={idx}>
                 <View style={styles.itemRow}>
-                  <View style={styles.itemImg}>
-                    <Ionicons name="cafe-outline" size={18} color={colors.brandMuted} />
-                  </View>
+                  {itemImageUrl(item) ? (
+                    <Image source={{ uri: itemImageUrl(item)! }} style={styles.itemImg} resizeMode="cover" />
+                  ) : (
+                    <View style={styles.itemImg}>
+                      <Ionicons name="cafe-outline" size={18} color={colors.brandMuted} />
+                    </View>
+                  )}
                   <View style={styles.itemInfo}>
                     <Text style={styles.itemName} numberOfLines={1}>
                       {item.menu_items?.name ?? 'Item'}

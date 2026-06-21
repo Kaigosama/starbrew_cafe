@@ -38,8 +38,7 @@ export default function AccountScreen() {
     {
       title: 'Account',
       rows: [
-        { label: 'Edit Profile',    icon: 'person-outline' },
-        { label: 'Saved Addresses', icon: 'location-outline' },
+        { label: 'Edit Profile',    icon: 'person-outline', onPress: () => router.push('/(customer)/edit-profile' as any) },
         { label: 'Notifications',   icon: 'notifications-outline', onPress: () => router.push('/(customer)/notifications' as any) },
       ],
     },

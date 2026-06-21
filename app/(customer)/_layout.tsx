@@ -1,9 +1,12 @@
+import { useEffect } from 'react';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../context/ThemeContext';
 import { FS, Sp } from '../../constants/theme';
+import { useAuthStore } from '../../store/authStore';
+import { registerForPushNotificationsAsync } from '../../lib/push';
 
 const TABS = [
   { name: 'index',    label: 'Home',     icon: 'home' as const,         outline: 'home-outline' as const },
@@ -63,6 +66,15 @@ function TabBar({ state, navigation }: any) {
 }
 
 export default function CustomerLayout() {
+  const user = useAuthStore((s) => s.user);
+
+  useEffect(() => {
+    if (!user) return;
+    registerForPushNotificationsAsync(user.id).catch((e) =>
+      console.error('push registration error:', e)
+    );
+  }, [user]);
+
   return (
     <Tabs
       tabBar={props => <TabBar {...props} />}
@@ -79,8 +91,8 @@ export default function CustomerLayout() {
       <Tabs.Screen name="order-confirmation" options={{ href: null }} />
       <Tabs.Screen name="order-status"       options={{ href: null }} />
       <Tabs.Screen name="order-history"      options={{ href: null }} />
-      <Tabs.Screen name="rewards"            options={{ href: null }} />
       <Tabs.Screen name="notifications"      options={{ href: null }} />
+      <Tabs.Screen name="edit-profile"       options={{ href: null }} />
     </Tabs>
   );
 }

@@ -78,6 +78,7 @@ export default function BaristaDashboard() {
   const [loading, setLoading] = useState(true);
   const [showCompleted, setShowCompleted] = useState(false);
   const [realtimeConnected, setRealtimeConnected] = useState(false);
+  const [storeOpen, setStoreOpen] = useState(true);
 
   const fetchOrders = useCallback(async () => {
     const { data, error } = await supabase
@@ -119,6 +120,31 @@ export default function BaristaDashboard() {
     };
   }, [fetchOrders]);
 
+  useEffect(() => {
+    supabase
+      .from('store_status')
+      .select('is_open')
+      .eq('id', 1)
+      .single()
+      .then(({ data, error }) => {
+        if (error) console.error('store_status fetch error:', error.message);
+        if (data) setStoreOpen(data.is_open);
+      });
+
+    const channel = supabase
+      .channel('store-status-dashboard')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'store_status' },
+        (payload) => setStoreOpen((payload.new as { is_open: boolean }).is_open)
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
   async function advanceOrder(id: string) {
     const order = orders.find((o) => o.id === id);
     if (!order) return;
@@ -149,9 +175,11 @@ export default function BaristaDashboard() {
           </View>
           <View style={styles.headerRight}>
             {realtimeConnected && (
-              <View style={styles.liveBadge}>
-                <View style={styles.liveDot} />
-                <Text style={styles.liveText}>Live</Text>
+              <View style={[styles.liveBadge, !storeOpen && styles.liveBadgeClosed]}>
+                <View style={[styles.liveDot, !storeOpen && styles.liveDotClosed]} />
+                <Text style={[styles.liveText, !storeOpen && styles.liveTextClosed]}>
+                  {storeOpen ? 'Live' : 'Closed'}
+                </Text>
               </View>
             )}
           </View>
@@ -186,7 +214,7 @@ export default function BaristaDashboard() {
                       <Ionicons name="person" size={18} color={colors.brandMuted} />
                     </View>
                     <Text style={styles.queueNum}>#{order.queuePosition}</Text>
-                    <Text style={styles.customerName} numberOfLines={1}>{order.customerName}</Text>
+                    <Text style={styles.customerName} numberOfLines={2}>{order.customerName}</Text>
                   </View>
 
                   <View style={styles.detailsCol}>
@@ -249,27 +277,36 @@ export default function BaristaDashboard() {
             />
           </TouchableOpacity>
 
-          {showCompleted && completed.map(order => (
-            <TouchableOpacity
-              key={order.id}
-              style={[styles.completedCard, cardShadow]}
-              onPress={() => router.push({ pathname: '/(barista)/order-detail', params: { id: order.id } } as any)}
-              activeOpacity={0.85}
-            >
-              <View style={styles.completedAvatar}>
-                <Ionicons name="person" size={14} color={colors.brandMuted} />
-              </View>
-              <View style={styles.completedInfo}>
-                <Text style={styles.completedName}>{order.customerName}</Text>
-                <Text style={styles.completedItems} numberOfLines={1}>{order.itemsSummary}</Text>
-              </View>
-              <View style={[styles.statusBadge, { backgroundColor: colors.bgSubtle }]}>
-                <Text style={[styles.statusText, { color: colors.textDisabled }]}>
-                  {order.status === 'Cancelled Remake In Progress' ? 'Cancelled' : 'Done'}
-                </Text>
-              </View>
-            </TouchableOpacity>
-          ))}
+          {showCompleted && completed.map(order => {
+            const isCancelled = order.status === 'Cancelled Remake In Progress';
+            return (
+              <TouchableOpacity
+                key={order.id}
+                style={[styles.completedCard, cardShadow]}
+                onPress={() => router.push({ pathname: '/(barista)/order-detail', params: { id: order.id } } as any)}
+                activeOpacity={0.85}
+              >
+                <View style={styles.completedAvatar}>
+                  <Ionicons name="person" size={14} color={colors.brandMuted} />
+                </View>
+                <View style={styles.completedInfo}>
+                  <Text style={styles.completedName}>{order.customerName}</Text>
+                  <Text style={styles.completedItems} numberOfLines={1}>{order.itemsSummary}</Text>
+                </View>
+                <View style={[
+                  styles.statusBadge,
+                  { backgroundColor: isCancelled ? STATUS_CONFIG[order.status].bg : colors.bgSubtle },
+                ]}>
+                  <Text style={[
+                    styles.statusText,
+                    { color: isCancelled ? STATUS_CONFIG[order.status].color : colors.textDisabled },
+                  ]}>
+                    {isCancelled ? 'Not Picked Up' : 'Done'}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
       )}
     </View>
@@ -294,6 +331,9 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
     },
     liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.statusSuccess },
     liveText: { fontSize: FS.overline, color: colors.statusSuccess, fontWeight: '700' },
+    liveBadgeClosed: { backgroundColor: colors.bgSubtle },
+    liveDotClosed: { backgroundColor: colors.textDisabled },
+    liveTextClosed: { color: colors.textDisabled },
     centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
     scroll: { paddingHorizontal: Sp[5], paddingBottom: 90 },
     empty: { alignItems: 'center', paddingTop: Sp[12], gap: Sp[3] },
@@ -302,13 +342,16 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       backgroundColor: colors.bgSurface, borderRadius: R.lg, padding: Sp[4], marginBottom: Sp[3],
     },
     cardTop: { flexDirection: 'row', gap: Sp[3] },
-    customerCol: { alignItems: 'center', width: 56 },
+    customerCol: { alignItems: 'center', width: 68 },
     avatar: {
       width: 40, height: 40, borderRadius: R.full, backgroundColor: colors.bgSubtle,
       alignItems: 'center', justifyContent: 'center', marginBottom: 3,
     },
     queueNum: { fontSize: FS.overline, fontWeight: '700', color: colors.brandPrimary, letterSpacing: 0.2 },
-    customerName: { fontSize: FS.overline, color: colors.textSecondary, textAlign: 'center' },
+    customerName: {
+      fontSize: FS.overline, color: colors.textSecondary, textAlign: 'center',
+      lineHeight: 13, marginTop: 1, flexShrink: 1,
+    },
     detailsCol: { flex: 1 },
     itemsText: { fontSize: FS.body, fontWeight: '600', color: colors.textPrimary, marginBottom: Sp[2], lineHeight: 19 },
     fulfillRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
@@ -37,6 +37,16 @@ export default function CheckoutScreen() {
   const [statusLoading, setStatusLoading] = useState(true);
 
   useEffect(() => {
+    function applyStatus(data: { is_open: boolean; pickup_enabled: boolean; delivery_enabled: boolean }) {
+      setStoreStatus({
+        isOpen: data.is_open,
+        pickupEnabled: data.pickup_enabled,
+        deliveryEnabled: data.delivery_enabled,
+      });
+      if (!data.pickup_enabled && data.delivery_enabled) setFulfill('drive-thru');
+      else if (data.pickup_enabled && !data.delivery_enabled) setFulfill('in-store');
+    }
+
     supabase
       .from('store_status')
       .select('is_open, pickup_enabled, delivery_enabled')
@@ -44,17 +54,22 @@ export default function CheckoutScreen() {
       .single()
       .then(({ data, error }) => {
         if (error) console.error('store_status fetch error:', error.message);
-        if (data) {
-          setStoreStatus({
-            isOpen: data.is_open,
-            pickupEnabled: data.pickup_enabled,
-            deliveryEnabled: data.delivery_enabled,
-          });
-          if (!data.pickup_enabled && data.delivery_enabled) setFulfill('drive-thru');
-          else if (data.pickup_enabled && !data.delivery_enabled) setFulfill('in-store');
-        }
+        if (data) applyStatus(data);
         setStatusLoading(false);
       });
+
+    const channel = supabase
+      .channel('store-status-checkout')
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'store_status' },
+        (payload) => applyStatus(payload.new as { is_open: boolean; pickup_enabled: boolean; delivery_enabled: boolean })
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const subtotal = items.reduce((s, i) => s + i.price * i.qty, 0);
@@ -71,7 +86,7 @@ export default function CheckoutScreen() {
   async function handlePaymentResult(success: boolean) {
     setPaymentModalVisible(false);
     if (!success) {
-      Alert.alert('Payment Failed', 'Your mock payment could not be processed. Please try again.');
+      Alert.alert('Payment Failed', 'Your payment could not be processed. Please try again.');
       return;
     }
     await placeOrder();
@@ -100,6 +115,7 @@ export default function CheckoutScreen() {
         queue_position: queuePosition,
         status: 'Order Received',
         pickup_method: fulfill,
+        payment_method: paymentMethod,
         estimated_eta_min: etaMin,
         total_price: total,
       })
@@ -119,7 +135,7 @@ export default function CheckoutScreen() {
         menu_item_id: item.menuItemId,
         quantity: item.qty,
         unit_price: item.price,
-        customizations: { size: item.size, milk: item.milk, addOns: item.addOns },
+        customizations: { size: item.size, milk: item.milk, addOns: item.addOns, temperature: item.temperature },
       }))
     );
 
@@ -202,11 +218,17 @@ export default function CheckoutScreen() {
           {items.map((item, idx) => (
             <View key={item.id}>
               <View style={styles.orderRow}>
-                <View style={styles.orderImg} />
+                {item.imageUrl ? (
+                  <Image source={{ uri: item.imageUrl }} style={styles.orderImg} resizeMode="cover" />
+                ) : (
+                  <View style={styles.orderImg} />
+                )}
                 <View style={styles.orderInfo}>
                   <Text style={styles.orderName} numberOfLines={1}>{item.name}</Text>
                   <Text style={styles.orderQty}>
-                    {item.size && item.milk ? `${item.size} · ${item.milk} · ` : ''}Qty {item.qty}
+                    {item.size
+                      ? `${item.temperature ? `${item.temperature} · ` : ''}${item.size}${item.milk ? ` · ${item.milk}` : ''} · `
+                      : ''}Qty {item.qty}
                   </Text>
                 </View>
                 <Text style={styles.orderPrice}>₱{item.price * item.qty}.00</Text>
@@ -273,7 +295,7 @@ export default function CheckoutScreen() {
                     color={colors.brandSecondary}
                   />
                   <Text style={styles.paymentLabel}>
-                    {pm === 'gcash' ? 'GCash · Mock Payment' : 'Cash · Mock Payment'}
+                    {pm === 'gcash' ? 'GCash' : 'Cash'}
                   </Text>
                 </View>
                 <View style={[styles.radioCircle, paymentMethod === pm && styles.radioCircleActive]}>
@@ -335,7 +357,7 @@ export default function CheckoutScreen() {
             <View style={styles.modalIconWrap}>
               <Ionicons name="card-outline" size={28} color={colors.brandPrimary} />
             </View>
-            <Text style={styles.modalTitle}>Mock Payment</Text>
+            <Text style={styles.modalTitle}>Payment</Text>
             <Text style={styles.modalSubtitle}>
               This is a simulated {paymentMethod === 'gcash' ? 'GCash' : 'Cash'} payment for demo purposes. No real money is charged.
             </Text>

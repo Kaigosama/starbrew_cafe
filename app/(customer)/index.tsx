@@ -9,7 +9,9 @@ import { useTheme } from '../../context/ThemeContext';
 import { useAuthStore } from '../../store/authStore';
 import { supabase } from '../../lib/supabase';
 
-type FeaturedItem = { id: string; name: string; price: number };
+type FeaturedItem = { id: string; name: string; price: number; imageUrl: string | null };
+
+const FEATURED_NAMES = ['Caramel Macchiato', 'Matcha Latte'];
 
 function getGreeting() {
   const h = new Date().getHours();
@@ -30,17 +32,22 @@ export default function HomeScreen() {
 
   const [featured, setFeatured] = useState<FeaturedItem[]>([]);
   const [storeOpen, setStoreOpen] = useState<boolean | null>(null);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
     supabase
       .from('menu_items')
-      .select('id, name, base_price')
+      .select('id, name, base_price, image_url')
       .eq('is_available', true)
-      .limit(2)
+      .in('name', FEATURED_NAMES)
       .then(({ data, error }) => {
         if (error) console.error('featured fetch error:', error.message);
         if (data) {
-          setFeatured(data.map(d => ({ id: String(d.id), name: d.name, price: d.base_price })));
+          const byName = new Map(data.map(d => [d.name, d]));
+          const ordered = FEATURED_NAMES.map(n => byName.get(n)).filter(Boolean) as typeof data;
+          setFeatured(ordered.map(d => ({
+            id: String(d.id), name: d.name, price: d.base_price, imageUrl: d.image_url ?? null,
+          })));
         }
       });
   }, []);
@@ -70,6 +77,33 @@ export default function HomeScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!user) return;
+
+    async function fetchUnreadCount() {
+      const { count } = await supabase
+        .from('notifications')
+        .select('id', { count: 'exact', head: true })
+        .eq('customer_id', user!.id)
+        .eq('is_read', false);
+      setUnreadCount(count ?? 0);
+    }
+    fetchUnreadCount();
+
+    const channel = supabase
+      .channel(`notifications-badge-${user.id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'notifications', filter: `customer_id=eq.${user.id}` },
+        () => fetchUnreadCount()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user]);
+
   return (
     <View style={styles.root}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
@@ -88,8 +122,14 @@ export default function HomeScreen() {
           <TouchableOpacity
             activeOpacity={0.7}
             onPress={() => router.push('/(customer)/notifications' as any)}
+            style={styles.bellBtn}
           >
             <Ionicons name="notifications-outline" size={24} color={colors.textPrimary} />
+            {unreadCount > 0 && (
+              <View style={styles.bellBadge}>
+                <Text style={styles.bellBadgeText}>{unreadCount > 9 ? '9+' : unreadCount}</Text>
+              </View>
+            )}
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -135,11 +175,15 @@ export default function HomeScreen() {
                   onPress={() =>
                     router.push({
                       pathname: '/(customer)/item-detail' as any,
-                      params: { id: item.id, name: item.name, price: item.price.toString() },
+                      params: { id: item.id, name: item.name, price: item.price.toString(), imageUrl: item.imageUrl ?? '' },
                     })
                   }
                 >
-                  <View style={styles.featuredImgPlaceholder} />
+                  {item.imageUrl ? (
+                    <Image source={{ uri: item.imageUrl }} style={styles.featuredImgPlaceholder} resizeMode="cover" />
+                  ) : (
+                    <View style={styles.featuredImgPlaceholder} />
+                  )}
                   <Text style={styles.featuredName} numberOfLines={2}>{item.name}</Text>
                   <Text style={styles.featuredPrice}>₱{item.price}.00</Text>
                 </TouchableOpacity>
@@ -174,6 +218,13 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
     headerLogo: { width: 40, height: 40 },
     headerTitle: { fontSize: FS.headingMd, fontWeight: '700', color: colors.textPrimary },
     headerSub: { fontSize: FS.caption, color: colors.textSecondary, marginTop: 1 },
+    bellBtn: { position: 'relative' },
+    bellBadge: {
+      position: 'absolute', top: -4, right: -6, minWidth: 16, height: 16, borderRadius: 8,
+      backgroundColor: colors.statusError, alignItems: 'center', justifyContent: 'center',
+      paddingHorizontal: 3, borderWidth: 1.5, borderColor: colors.bgBase,
+    },
+    bellBadgeText: { fontSize: 10, fontWeight: '700', color: colors.textInverse },
     scroll: { paddingHorizontal: Sp[5], paddingBottom: Sp[8] },
     sectionLabel: {
       fontSize: FS.headingSm, fontWeight: '700', color: colors.textPrimary,

@@ -43,7 +43,10 @@ export default function OrderStatusScreen() {
   const [cancelling, setCancelling] = useState(false);
   const [qrVisible, setQrVisible] = useState(false);
 
-  const sawActiveRef = useRef(false);
+  const orderIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    orderIdRef.current = order?.id ?? null;
+  }, [order]);
 
   const fetchOrder = useCallback(async () => {
     if (!user) return;
@@ -62,16 +65,7 @@ export default function OrderStatusScreen() {
           .maybeSingle();
 
     if (error) console.error('order-status fetch error:', error.message);
-    const fetched = data as unknown as Order | null;
-
-    if (fetched && fetched.status !== 'Picked Up') {
-      sawActiveRef.current = true;
-    } else if (fetched?.status === 'Picked Up' && sawActiveRef.current) {
-      router.back();
-      return;
-    }
-
-    setOrder(fetched);
+    setOrder(data as unknown as Order | null);
   }, [user, id]);
 
   useEffect(() => {
@@ -89,7 +83,16 @@ export default function OrderStatusScreen() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'orders', filter: `customer_id=eq.${user.id}` },
-        () => {
+        (payload) => {
+          const updated = payload.new as { id?: string; status?: string };
+          if (updated.id === orderIdRef.current && updated.status === 'Picked Up') {
+            setQrVisible(false);
+            Alert.alert(
+              'Order picked up!',
+              'Enjoy your order — see you next time!',
+              [{ text: 'OK', onPress: () => router.replace('/(customer)') }]
+            );
+          }
           if (isMounted) fetchOrder();
         }
       )
@@ -122,7 +125,7 @@ export default function OrderStatusScreen() {
               Alert.alert('Could not cancel order', error.message);
               return;
             }
-            setOrder(null);
+            router.replace({ pathname: '/(customer)/order-detail' as any, params: { id: order.id } });
           },
         },
       ]

@@ -1,18 +1,32 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { R, FS, Sp, cardShadow } from '../../constants/theme';
 import { useTheme } from '../../context/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authStore';
+import { useCartStore } from '../../store/cartStore';
 
 type Filter = 'All' | 'In-Store' | 'Drive-Thru';
 const FILTERS: Filter[] = ['All', 'In-Store', 'Drive-Thru'];
 
-type OrderItemRow = { quantity: number; menu_items: { name: string } | null };
+type OrderCustomizations = {
+  size?: string;
+  milk?: string;
+  addOns?: string[];
+  temperature?: 'Hot' | 'Cold' | null;
+} | null;
+
+type OrderItemRow = {
+  quantity: number;
+  unit_price: number;
+  menu_item_id: number;
+  customizations: OrderCustomizations;
+  menu_items: { name: string; image_url: string | null } | null;
+};
 type Order = {
   id: string;
   queue_position: number;
@@ -50,26 +64,52 @@ export default function OrderHistoryScreen() {
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const user = useAuthStore((s) => s.user);
+  const addItem = useCartStore((s) => s.addItem);
+  const clearCart = useCartStore((s) => s.clear);
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>('All');
 
-  useEffect(() => {
+  const fetchOrders = useCallback(async () => {
     if (!user) return;
-    async function fetch() {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from('orders')
-        .select('id, queue_position, status, pickup_method, total_price, created_at, order_items(quantity, menu_items(name))')
-        .eq('customer_id', user!.id)
-        .order('created_at', { ascending: false });
-      if (error) console.error('order-history fetch error:', error.message);
-      if (data) setOrders(data as unknown as Order[]);
-      setLoading(false);
-    }
-    fetch();
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('orders')
+      .select('id, queue_position, status, pickup_method, total_price, created_at, order_items(quantity, unit_price, menu_item_id, customizations, menu_items(name, image_url))')
+      .eq('customer_id', user.id)
+      .order('created_at', { ascending: false });
+    if (error) console.error('order-history fetch error:', error.message);
+    if (data) setOrders(data as unknown as Order[]);
+    setLoading(false);
   }, [user]);
+
+  function handleReorder(order: Order) {
+    clearCart();
+    order.order_items.forEach(oi => {
+      const c = oi.customizations ?? {};
+      for (let i = 0; i < oi.quantity; i++) {
+        addItem({
+          id: String(oi.menu_item_id),
+          menuItemId: oi.menu_item_id,
+          name: oi.menu_items?.name ?? 'Item',
+          price: oi.unit_price,
+          size: c.size ?? '',
+          milk: c.milk ?? '',
+          addOns: c.addOns ?? [],
+          imageUrl: oi.menu_items?.image_url ?? null,
+          temperature: c.temperature ?? null,
+        });
+      }
+    });
+    router.push('/(customer)/checkout' as any);
+  }
+
+  useFocusEffect(
+    useCallback(() => {
+      fetchOrders();
+    }, [fetchOrders])
+  );
 
   const filtered = useMemo(() => {
     if (filter === 'All') return orders;
@@ -149,7 +189,11 @@ export default function OrderHistoryScreen() {
                 </View>
                 <View style={styles.orderBottom}>
                   <Text style={styles.orderTotal}>₱{order.total_price}.00</Text>
-                  <TouchableOpacity style={styles.reorderBtn} activeOpacity={0.8}>
+                  <TouchableOpacity
+                    style={styles.reorderBtn}
+                    activeOpacity={0.8}
+                    onPress={() => handleReorder(order)}
+                  >
                     <Ionicons name="refresh-outline" size={14} color={colors.brandPrimary} />
                     <Text style={styles.reorderText}>Reorder</Text>
                   </TouchableOpacity>

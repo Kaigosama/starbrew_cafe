@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
@@ -21,10 +21,10 @@ export default function ItemDetailScreen() {
   const addItem = useCartStore((s) => s.addItem);
   const removeItem = useCartStore((s) => s.removeItem);
 
-  const { id, name, price, cartItemId, qty: qtyParam, size: sizeParam, milk: milkParam, addOns: addOnsParam } =
+  const { id, name, price, cartItemId, qty: qtyParam, size: sizeParam, milk: milkParam, addOns: addOnsParam, imageUrl: imageUrlParam, temperature: temperatureParam } =
     useLocalSearchParams<{
       id?: string; name?: string; price?: string;
-      cartItemId?: string; qty?: string; size?: string; milk?: string; addOns?: string;
+      cartItemId?: string; qty?: string; size?: string; milk?: string; addOns?: string; imageUrl?: string; temperature?: string;
     }>();
   const itemId = id ?? '0';
   const itemName = name ?? 'Cold Brew';
@@ -36,11 +36,21 @@ export default function ItemDetailScreen() {
   const [addOns, setAddOns] = useState<string[]>(addOnsParam ? addOnsParam.split(',').filter(Boolean) : []);
   const [qty, setQty] = useState(qtyParam ? parseInt(qtyParam, 10) : 1);
   const [isFood, setIsFood] = useState(false);
+  const [servesHot, setServesHot] = useState(false);
+  const [servesCold, setServesCold] = useState(false);
+  const [imageUrlHot, setImageUrlHot] = useState<string | null>(imageUrlParam || null);
+  const [imageUrlCold, setImageUrlCold] = useState<string | null>(null);
+  const [descriptionHot, setDescriptionHot] = useState<string | null>(null);
+  const [descriptionCold, setDescriptionCold] = useState<string | null>(null);
+  const [hasMilkOptions, setHasMilkOptions] = useState(true);
+  const [temperature, setTemperature] = useState<'Hot' | 'Cold' | null>(
+    (temperatureParam as 'Hot' | 'Cold') || null
+  );
 
   useEffect(() => {
     supabase
       .from('menu_items')
-      .select('categories(name)')
+      .select('categories(name), serves_hot, serves_cold, image_url, image_url_cold, description, description_cold, has_milk_options')
       .eq('id', itemId)
       .single()
       .then(({ data, error }) => {
@@ -50,8 +60,24 @@ export default function ItemDetailScreen() {
         }
         const categoryName = (data?.categories as { name: string } | null)?.name;
         setIsFood(categoryName?.toLowerCase() === 'food');
+        setServesHot(!!data?.serves_hot);
+        setServesCold(!!data?.serves_cold);
+        setImageUrlHot(data?.image_url ?? imageUrlParam ?? null);
+        setImageUrlCold(data?.image_url_cold ?? null);
+        setDescriptionHot(data?.description ?? null);
+        setDescriptionCold(data?.description_cold ?? null);
+        setHasMilkOptions(data?.has_milk_options !== false);
+        if (!temperatureParam) {
+          setTemperature(data?.serves_hot ? 'Hot' : data?.serves_cold ? 'Cold' : null);
+        }
       });
   }, [itemId]);
+
+  const showTemperaturePicker = !isFood && servesHot && servesCold;
+  const imageUrl = temperature === 'Cold' && imageUrlCold ? imageUrlCold : imageUrlHot;
+  const description =
+    (temperature === 'Cold' && descriptionCold ? descriptionCold : descriptionHot)
+    ?? 'Handcrafted just for you.';
 
   function toggleAddOn(opt: string) {
     setAddOns(prev =>
@@ -73,8 +99,10 @@ export default function ItemDetailScreen() {
         name: itemName,
         price: basePrice + addOnsTotal,
         size: isFood ? '' : size,
-        milk: isFood ? '' : milk,
+        milk: isFood || !hasMilkOptions ? '' : milk,
         addOns: isFood ? [] : addOns,
+        imageUrl,
+        temperature: isFood ? null : temperature,
       });
     }
     if (isEditing) {
@@ -103,18 +131,37 @@ export default function ItemDetailScreen() {
       </SafeAreaView>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scroll}>
-        <View style={styles.imgPlaceholder}>
-          <Ionicons name={isFood ? 'restaurant-outline' : 'cafe-outline'} size={56} color={colors.brandMuted} />
-        </View>
+        {imageUrl ? (
+          <Image source={{ uri: imageUrl }} style={styles.imgPlaceholder} resizeMode="cover" />
+        ) : (
+          <View style={styles.imgPlaceholder}>
+            <Ionicons name={isFood ? 'restaurant-outline' : 'cafe-outline'} size={56} color={colors.brandMuted} />
+          </View>
+        )}
 
         <View style={styles.nameRow}>
           <Text style={styles.itemName}>{itemName}</Text>
           <Text style={styles.itemPrice}>₱{basePrice}.00</Text>
         </View>
-        <Text style={styles.itemDesc}>
-          A smooth, cold-steeped coffee with a rich, naturally sweet flavour.
-          Perfect for any time of day.
-        </Text>
+        <Text style={styles.itemDesc}>{description}</Text>
+
+        {!isFood && showTemperaturePicker && (
+          <>
+            <Text style={styles.optionLabel}>Temperature</Text>
+            <View style={styles.sizeRow}>
+              {(['Hot', 'Cold'] as const).map(t => (
+                <TouchableOpacity
+                  key={t}
+                  style={[styles.sizeBtn, temperature === t && styles.sizeBtnActive]}
+                  onPress={() => setTemperature(t)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.sizeBtnText, temperature === t && styles.sizeBtnTextActive]}>{t}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </>
+        )}
 
         {!isFood && (
           <>
@@ -132,24 +179,28 @@ export default function ItemDetailScreen() {
               ))}
             </View>
 
-            <Text style={styles.optionLabel}>Milk</Text>
-            <View style={[styles.optionCard, cardShadow]}>
-              {MILK_OPTIONS.map((opt, idx) => (
-                <View key={opt}>
-                  <TouchableOpacity
-                    style={styles.radioRow}
-                    onPress={() => setMilk(opt)}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.radioLabel}>{opt}</Text>
-                    <View style={[styles.radioCircle, milk === opt && styles.radioCircleActive]}>
-                      {milk === opt && <View style={styles.radioDot} />}
+            {hasMilkOptions && (
+              <>
+                <Text style={styles.optionLabel}>Milk</Text>
+                <View style={[styles.optionCard, cardShadow]}>
+                  {MILK_OPTIONS.map((opt, idx) => (
+                    <View key={opt}>
+                      <TouchableOpacity
+                        style={styles.radioRow}
+                        onPress={() => setMilk(opt)}
+                        activeOpacity={0.7}
+                      >
+                        <Text style={styles.radioLabel}>{opt}</Text>
+                        <View style={[styles.radioCircle, milk === opt && styles.radioCircleActive]}>
+                          {milk === opt && <View style={styles.radioDot} />}
+                        </View>
+                      </TouchableOpacity>
+                      {idx < MILK_OPTIONS.length - 1 && <View style={styles.divider} />}
                     </View>
-                  </TouchableOpacity>
-                  {idx < MILK_OPTIONS.length - 1 && <View style={styles.divider} />}
+                  ))}
                 </View>
-              ))}
-            </View>
+              </>
+            )}
 
             <Text style={styles.optionLabel}>
               Add-ons <Text style={styles.optionSub}>(+₱20 each)</Text>

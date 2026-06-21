@@ -12,12 +12,13 @@ import { useAuthStore } from '../../store/authStore';
 export default function BaristaSettingsScreen() {
   const { colors, isDark, toggleTheme } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
+  const user = useAuthStore((s) => s.user);
   const setSession = useAuthStore((s) => s.setSession);
+  const baristaName = (user?.user_metadata?.full_name as string) || user?.email || 'Barista';
 
   const [storeOpen, setStoreOpen] = useState(true);
   const [pickupEnabled, setPickupEnabled] = useState(true);
   const [deliveryEnabled, setDeliveryEnabled] = useState(true);
-  const [notifications, setNotifications] = useState(true);
 
   useEffect(() => {
     supabase
@@ -84,10 +85,10 @@ export default function BaristaSettingsScreen() {
             <Ionicons name="person" size={28} color={colors.brandMuted} />
           </View>
           <View style={styles.profileInfo}>
-            <Text style={styles.profileName}>Barista Name</Text>
+            <Text style={styles.profileName}>{baristaName}</Text>
             <Text style={styles.profileRole}>StarBrew Cafe Makati</Text>
           </View>
-          <TouchableOpacity activeOpacity={0.7}>
+          <TouchableOpacity onPress={() => router.push('/(barista)/edit-profile')} activeOpacity={0.7}>
             <Ionicons name="pencil-outline" size={18} color={colors.brandSecondary} />
           </TouchableOpacity>
         </View>
@@ -151,21 +152,6 @@ export default function BaristaSettingsScreen() {
 
         <Text style={styles.sectionTitle}>Preferences</Text>
         <View style={[styles.card, cardShadow]}>
-          <View style={styles.switchRow}>
-            <View style={styles.switchLeft}>
-              <View style={styles.switchIcon}>
-                <Ionicons name="notifications-outline" size={18} color={colors.brandSecondary} />
-              </View>
-              <Text style={styles.switchLabel}>Order Notifications</Text>
-            </View>
-            <Switch
-              value={notifications}
-              onValueChange={setNotifications}
-              trackColor={{ false: colors.border, true: colors.brandPrimary }}
-              thumbColor={colors.bgSurface}
-            />
-          </View>
-          <View style={styles.divider} />
           <View style={styles.switchRow}>
             <View style={styles.switchLeft}>
               <View style={styles.switchIcon}>

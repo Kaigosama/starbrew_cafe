@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
@@ -9,12 +9,12 @@ import { useTheme } from '../../context/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authStore';
 
-type Customizations = { size?: string; milk?: string; addOns?: string[] } | null;
+type Customizations = { size?: string; milk?: string; addOns?: string[]; temperature?: string } | null;
 type OrderItemRow = {
   quantity: number;
   unit_price: number;
   customizations: Customizations;
-  menu_items: { name: string } | null;
+  menu_items: { name: string; image_url: string | null; image_url_cold: string | null } | null;
 };
 type Order = {
   id: string;
@@ -33,8 +33,15 @@ function formatDateTime(iso: string) {
 }
 
 function itemSubtitle(item: OrderItemRow) {
-  const parts = [item.customizations?.size, item.customizations?.milk].filter(Boolean);
+  const parts = [item.customizations?.temperature, item.customizations?.size, item.customizations?.milk].filter(Boolean);
   return parts.length ? `${parts.join(' · ')} · Qty ${item.quantity}` : `Qty ${item.quantity}`;
+}
+
+function itemImageUrl(item: OrderItemRow) {
+  if (item.customizations?.temperature === 'Cold' && item.menu_items?.image_url_cold) {
+    return item.menu_items.image_url_cold;
+  }
+  return item.menu_items?.image_url ?? null;
 }
 
 export default function OrderDetailScreen() {
@@ -52,7 +59,7 @@ export default function OrderDetailScreen() {
       setLoading(true);
       const { data, error } = await supabase
         .from('orders')
-        .select('id, queue_position, status, pickup_method, total_price, created_at, order_items(quantity, unit_price, customizations, menu_items(name))')
+        .select('id, queue_position, status, pickup_method, total_price, created_at, order_items(quantity, unit_price, customizations, menu_items(name, image_url, image_url_cold))')
         .eq('customer_id', user.id)
         .eq('id', id)
         .maybeSingle();
@@ -119,9 +126,13 @@ export default function OrderDetailScreen() {
             {(order.order_items ?? []).map((item, idx) => (
               <View key={idx}>
                 <View style={styles.itemRow}>
-                  <View style={styles.itemImg}>
-                    <Ionicons name="cafe-outline" size={18} color={colors.brandMuted} />
-                  </View>
+                  {itemImageUrl(item) ? (
+                    <Image source={{ uri: itemImageUrl(item)! }} style={styles.itemImg} resizeMode="cover" />
+                  ) : (
+                    <View style={styles.itemImg}>
+                      <Ionicons name="cafe-outline" size={18} color={colors.brandMuted} />
+                    </View>
+                  )}
                   <View style={styles.itemInfo}>
                     <Text style={styles.itemName} numberOfLines={1}>
                       {item.menu_items?.name ?? 'Item'}

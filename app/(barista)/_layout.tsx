@@ -1,9 +1,12 @@
+import { useEffect } from 'react';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../../context/ThemeContext';
 import { FS, Sp } from '../../constants/theme';
+import { useAuthStore } from '../../store/authStore';
+import { registerForPushNotificationsAsync } from '../../lib/push';
 
 const TABS = [
   { name: 'dashboard', label: 'Orders',   icon: 'list' as const,      outline: 'list-outline' as const },
@@ -61,6 +64,15 @@ function BaristaTabBar({ state, navigation }: any) {
 }
 
 export default function BaristaLayout() {
+  const user = useAuthStore((s) => s.user);
+
+  useEffect(() => {
+    if (!user) return;
+    registerForPushNotificationsAsync(user.id).catch((e) =>
+      console.error('push registration error:', e)
+    );
+  }, [user]);
+
   return (
     <Tabs
       tabBar={props => <BaristaTabBar {...props} />}
@@ -72,6 +84,7 @@ export default function BaristaLayout() {
       <Tabs.Screen name="settings" />
       <Tabs.Screen name="qr-scanner" options={{ href: null }} />
       <Tabs.Screen name="order-detail" options={{ href: null }} />
+      <Tabs.Screen name="edit-profile" options={{ href: null }} />
     </Tabs>
   );
 }

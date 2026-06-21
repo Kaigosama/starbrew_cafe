@@ -1,63 +1,89 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
-  Image, KeyboardAvoidingView, Platform, ScrollView,
-  StyleSheet, Text, TextInput, TouchableOpacity, View, Alert,
+  Alert, KeyboardAvoidingView, Platform, ScrollView,
+  StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { R, FS, Sp, cardShadow } from '../../constants/theme';
 import { useTheme } from '../../context/ThemeContext';
 import { supabase } from '../../lib/supabase';
-import { useAuthStore } from '../../store/authStore';
 
-export default function RegisterScreen() {
+export default function ResetPasswordScreen() {
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const LOGO = isDark
-    ? require('../../assets/starbrew-logo_dark.png')
-    : require('../../assets/starbrew-logo_light.png');
+  const { email } = useLocalSearchParams<{ email: string }>();
 
-  const setSession = useAuthStore((s) => s.setSession);
-
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [code, setCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
 
-  async function handleRegister() {
-    if (!firstName || !email || !password) {
-      Alert.alert('Missing fields', 'Please fill in all required fields.');
-      return;
+  useEffect(() => {
+    if (!email) {
+      router.replace('/(auth)/forgot-password');
     }
-    setLoading(true);
-    const fullName = `${firstName} ${lastName}`.trim();
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: { firstName, lastName, full_name: fullName, role: 'customer' },
-      },
-    });
-    setLoading(false);
+  }, [email]);
+
+  async function handleResendCode() {
+    if (!email) return;
+    setResending(true);
+    const { error } = await supabase.auth.resetPasswordForEmail(email);
+    setResending(false);
     if (error) {
-      Alert.alert('Sign up failed', error.message);
+      Alert.alert('Could not resend code', error.message);
       return;
     }
-    if (data.user) {
-      const { error: profileError } = await supabase
-        .from('users')
-        .update({ full_name: fullName, role: 'customer' })
-        .eq('id', data.user.id);
-      if (profileError) console.error('users update error:', profileError.message);
+    Alert.alert('Code sent', 'A new verification code has been sent to your email.');
+  }
+
+  async function handleReset() {
+    if (!email) return;
+    if (!code.trim()) {
+      Alert.alert('Missing code', 'Please enter the verification code sent to your email.');
+      return;
     }
-    if (data.session) {
-      setSession(data.session);
+    if (newPassword.length < 6) {
+      Alert.alert('Weak password', 'Password must be at least 6 characters.');
+      return;
     }
-    router.replace('/(customer)');
+    if (newPassword !== confirmPassword) {
+      Alert.alert("Passwords don't match", 'Please re-enter the same password in both fields.');
+      return;
+    }
+
+    setLoading(true);
+
+    const { error: verifyError } = await supabase.auth.verifyOtp({
+      email,
+      token: code.trim(),
+      type: 'recovery',
+    });
+    if (verifyError) {
+      setLoading(false);
+      Alert.alert('Invalid code', verifyError.message);
+      return;
+    }
+
+    const { error: updateError } = await supabase.auth.updateUser({ password: newPassword });
+    if (updateError) {
+      setLoading(false);
+      Alert.alert('Could not reset password', updateError.message);
+      return;
+    }
+
+    await supabase.auth.signOut();
+    setLoading(false);
+
+    Alert.alert(
+      'Password reset',
+      'You can now sign in with your new password.',
+      [{ text: 'OK', onPress: () => router.replace('/(auth)/signin') }]
+    );
   }
 
   return (
@@ -81,68 +107,38 @@ export default function RegisterScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.logoRow}>
-            <Image source={LOGO} style={styles.logo} resizeMode="contain" />
-          </View>
-
           <View style={styles.card}>
-            <Text style={styles.title}>Create your account</Text>
-            <Text style={styles.subtitle}>Join StarBrew Cafe today</Text>
-
-            <View style={styles.nameRow}>
-              <View style={[styles.field, styles.halfField]}>
-                <Text style={styles.fieldLabel}>First Name</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="First"
-                  placeholderTextColor={colors.textDisabled}
-                  value={firstName}
-                  onChangeText={setFirstName}
-                  autoCapitalize="words"
-                  returnKeyType="next"
-                />
-              </View>
-              <View style={[styles.field, styles.halfField]}>
-                <Text style={styles.fieldLabel}>Last Name</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder="Last"
-                  placeholderTextColor={colors.textDisabled}
-                  value={lastName}
-                  onChangeText={setLastName}
-                  autoCapitalize="words"
-                  returnKeyType="next"
-                />
-              </View>
-            </View>
+            <Text style={styles.title}>Reset password</Text>
+            <Text style={styles.subtitle}>
+              Enter the code sent to {email} and choose a new password.
+            </Text>
 
             <View style={styles.field}>
-              <Text style={styles.fieldLabel}>Email</Text>
+              <Text style={styles.fieldLabel}>Verification Code</Text>
               <TextInput
                 style={styles.input}
-                placeholder="your@email.com"
+                placeholder="8-digit code"
                 placeholderTextColor={colors.textDisabled}
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
+                value={code}
+                onChangeText={setCode}
+                keyboardType="number-pad"
+                maxLength={8}
                 returnKeyType="next"
               />
             </View>
 
             <View style={styles.field}>
-              <Text style={styles.fieldLabel}>Password</Text>
+              <Text style={styles.fieldLabel}>New Password</Text>
               <View style={styles.pwRow}>
                 <TextInput
                   style={styles.pwInput}
-                  placeholder="Create a password"
+                  placeholder="Create a new password"
                   placeholderTextColor={colors.textDisabled}
-                  value={password}
-                  onChangeText={setPassword}
+                  value={newPassword}
+                  onChangeText={setNewPassword}
                   secureTextEntry={!showPw}
                   autoCapitalize="none"
-                  returnKeyType="done"
-                  onSubmitEditing={handleRegister}
+                  returnKeyType="next"
                 />
                 <TouchableOpacity onPress={() => setShowPw(v => !v)} activeOpacity={0.7}>
                   <Ionicons
@@ -154,14 +150,40 @@ export default function RegisterScreen() {
               </View>
             </View>
 
+            <View style={styles.field}>
+              <Text style={styles.fieldLabel}>Confirm New Password</Text>
+              <View style={styles.pwRow}>
+                <TextInput
+                  style={styles.pwInput}
+                  placeholder="Re-enter new password"
+                  placeholderTextColor={colors.textDisabled}
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                  secureTextEntry={!showPw}
+                  autoCapitalize="none"
+                  returnKeyType="done"
+                  onSubmitEditing={handleReset}
+                />
+              </View>
+            </View>
+
             <TouchableOpacity
-              style={[styles.signUpBtn, loading && styles.signUpBtnDisabled]}
-              onPress={handleRegister}
+              style={[styles.resetBtn, loading && styles.resetBtnDisabled]}
+              onPress={handleReset}
               activeOpacity={0.85}
               disabled={loading}
             >
-              <Text style={styles.signUpBtnText}>
-                {loading ? 'Creating account…' : 'Create account'}
+              <Text style={styles.resetBtnText}>{loading ? 'Resetting…' : 'Reset Password'}</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.resendRow}
+              onPress={handleResendCode}
+              activeOpacity={0.7}
+              disabled={resending}
+            >
+              <Text style={styles.resendText}>
+                {resending ? 'Sending…' : "Didn't get a code? Resend"}
               </Text>
             </TouchableOpacity>
           </View>
@@ -193,11 +215,9 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
     },
     body: {
       paddingHorizontal: Sp[5],
-      paddingTop: Sp[4],
+      paddingTop: Sp[8],
       paddingBottom: Sp[10],
     },
-    logoRow: { alignItems: 'center', marginBottom: Sp[6] },
-    logo: { width: 80, height: 80 },
     card: {
       backgroundColor: colors.bgSurface,
       borderRadius: R.xl,
@@ -215,9 +235,7 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       color: colors.textSecondary,
       marginBottom: Sp[5],
     },
-    nameRow: { flexDirection: 'row', gap: Sp[3] },
     field: { marginBottom: Sp[4] },
-    halfField: { flex: 1 },
     fieldLabel: {
       fontSize: FS.label,
       fontWeight: '500',
@@ -245,18 +263,24 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       borderColor: colors.border,
     },
     pwInput: { flex: 1, fontSize: FS.body, color: colors.textPrimary },
-    signUpBtn: {
+    resetBtn: {
       backgroundColor: colors.brandPrimary,
       borderRadius: R.md,
       paddingVertical: 15,
       alignItems: 'center',
       marginTop: Sp[2],
     },
-    signUpBtnDisabled: { opacity: 0.6 },
-    signUpBtnText: {
+    resetBtnDisabled: { opacity: 0.6 },
+    resetBtnText: {
       color: colors.textInverse,
       fontSize: FS.bodyLg,
       fontWeight: '700',
+    },
+    resendRow: { alignItems: 'center', marginTop: Sp[4] },
+    resendText: {
+      fontSize: FS.body,
+      color: colors.brandPrimary,
+      fontWeight: '600',
     },
   });
 }

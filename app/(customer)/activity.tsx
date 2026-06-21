@@ -8,8 +8,22 @@ import { R, FS, Sp, cardShadow } from '../../constants/theme';
 import { useTheme } from '../../context/ThemeContext';
 import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authStore';
+import { useCartStore } from '../../store/cartStore';
 
-type OrderItemRow = { quantity: number; menu_items: { name: string } | null };
+type OrderCustomizations = {
+  size?: string;
+  milk?: string;
+  addOns?: string[];
+  temperature?: 'Hot' | 'Cold' | null;
+} | null;
+
+type OrderItemRow = {
+  quantity: number;
+  unit_price: number;
+  menu_item_id: number;
+  customizations: OrderCustomizations;
+  menu_items: { name: string; image_url: string | null } | null;
+};
 type Order = {
   id: string;
   queue_position: number;
@@ -32,14 +46,19 @@ function formatDateTime(iso: string) {
     '  ·  ' + d.toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' });
 }
 
-function firstItemName(items: OrderItemRow[]) {
-  return items?.[0]?.menu_items?.name ?? 'Order';
+function orderDisplayName(items: OrderItemRow[]) {
+  if (!items || items.length === 0) return 'Order';
+  const first = items[0]?.menu_items?.name ?? 'Item';
+  if (items.length === 1) return first;
+  return `${first} +${items.length - 1} more`;
 }
 
 export default function ActivityScreen() {
   const { colors, isDark } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const user = useAuthStore((s) => s.user);
+  const addItem = useCartStore((s) => s.addItem);
+  const clearCart = useCartStore((s) => s.clear);
 
   const [activeOrder, setActiveOrder] = useState<Order | null>(null);
   const [recentOrders, setRecentOrders] = useState<Order[]>([]);
@@ -51,7 +70,7 @@ export default function ActivityScreen() {
     // Most recent non-completed order
     const { data: active, error: activeError } = await supabase
       .from('orders')
-      .select('id, queue_position, status, total_price, estimated_eta_min, created_at, order_items(quantity, menu_items(name))')
+      .select('id, queue_position, status, total_price, estimated_eta_min, created_at, order_items(quantity, unit_price, menu_item_id, customizations, menu_items(name, image_url))')
       .eq('customer_id', user.id)
       .neq('status', 'Picked Up')
       .neq('status', 'Cancelled Remake In Progress')
@@ -60,12 +79,12 @@ export default function ActivityScreen() {
       .maybeSingle();
     if (activeError) console.error('activity active order error:', activeError.message);
 
-    // Recent completed orders
+    // Recent completed or cancelled orders
     const { data: recent, error: recentError } = await supabase
       .from('orders')
-      .select('id, queue_position, status, total_price, estimated_eta_min, created_at, order_items(quantity, menu_items(name))')
+      .select('id, queue_position, status, total_price, estimated_eta_min, created_at, order_items(quantity, unit_price, menu_item_id, customizations, menu_items(name, image_url))')
       .eq('customer_id', user.id)
-      .eq('status', 'Picked Up')
+      .in('status', ['Picked Up', 'Cancelled Remake In Progress'])
       .order('created_at', { ascending: false })
       .limit(5);
     if (recentError) console.error('activity recent orders error:', recentError.message);
@@ -101,6 +120,27 @@ export default function ActivityScreen() {
     };
   }, [user, fetchOrders]);
 
+  function handleReorder(order: Order) {
+    clearCart();
+    order.order_items.forEach(oi => {
+      const c = oi.customizations ?? {};
+      for (let i = 0; i < oi.quantity; i++) {
+        addItem({
+          id: String(oi.menu_item_id),
+          menuItemId: oi.menu_item_id,
+          name: oi.menu_items?.name ?? 'Item',
+          price: oi.unit_price,
+          size: c.size ?? '',
+          milk: c.milk ?? '',
+          addOns: c.addOns ?? [],
+          imageUrl: oi.menu_items?.image_url ?? null,
+          temperature: c.temperature ?? null,
+        });
+      }
+    });
+    router.push('/(customer)/checkout' as any);
+  }
+
   return (
     <View style={styles.root}>
       <StatusBar style={isDark ? 'light' : 'dark'} />
@@ -131,7 +171,7 @@ export default function ActivityScreen() {
                   </View>
                   <View style={styles.orderCardInfo}>
                     <Text style={styles.orderCardDrink} numberOfLines={1}>
-                      {firstItemName(activeOrder.order_items)}
+                      {orderDisplayName(activeOrder.order_items)}
                     </Text>
                     <Text style={styles.orderCardLocation}>StarBrew Cafe Makati</Text>
                     {STATUS_LABEL[activeOrder.status] && (
@@ -142,9 +182,6 @@ export default function ActivityScreen() {
                         </Text>
                       </View>
                     )}
-                    <Text style={styles.etaInline}>
-                      Est. {activeOrder.estimated_eta_min} min
-                    </Text>
                   </View>
                   <Text style={styles.orderCardPrice}>₱{activeOrder.total_price}.00</Text>
                 </View>
@@ -154,14 +191,16 @@ export default function ActivityScreen() {
                 <View style={styles.orderCardFooter}>
                   <View style={styles.footerTile}>
                     <Ionicons name="list-outline" size={18} color={colors.brandPrimary} />
-                    <Text style={styles.footerTileLabel}>Queue Number</Text>
-                    <Text style={styles.footerTileValue}>#{activeOrder.queue_position}</Text>
+                    <Text style={styles.footerTileLabel} numberOfLines={1}>Queue Number</Text>
+                    <Text style={styles.footerTileValue} numberOfLines={1}>#{activeOrder.queue_position}</Text>
                   </View>
                   <View style={styles.footerTileSep} />
                   <View style={styles.footerTile}>
-                    <Ionicons name="navigate-outline" size={18} color={colors.brandPrimary} />
-                    <Text style={styles.footerTileLabel} numberOfLines={1}>View Details & Tracking</Text>
-                    <Ionicons name="chevron-forward" size={14} color={colors.textSecondary} />
+                    <Ionicons name="time-outline" size={18} color={colors.brandPrimary} />
+                    <Text style={styles.footerTileLabel} numberOfLines={1}>Estimated Time</Text>
+                    <Text style={styles.footerTileValue} numberOfLines={1}>
+                      {activeOrder.estimated_eta_min} min
+                    </Text>
                   </View>
                 </View>
               </TouchableOpacity>
@@ -192,29 +231,45 @@ export default function ActivityScreen() {
                 </View>
 
                 <View style={[styles.recentCard, cardShadow]}>
-                  {recentOrders.map((order, idx) => (
-                    <View key={order.id}>
-                      <TouchableOpacity
-                        style={styles.recentRow}
-                        onPress={() => router.push({ pathname: '/(customer)/order-detail' as any, params: { id: order.id } })}
-                        activeOpacity={0.8}
-                      >
-                        <View style={styles.recentImg} />
-                        <View style={styles.recentInfo}>
-                          <Text style={styles.recentName} numberOfLines={1}>
-                            {firstItemName(order.order_items)} – StarBrew Cafe Makati
-                          </Text>
-                          <Text style={styles.recentDate}>{formatDateTime(order.created_at)}</Text>
-                          <TouchableOpacity style={styles.reorderBtn} activeOpacity={0.7}>
-                            <Text style={styles.reorderText}>Reorder</Text>
-                            <Ionicons name="arrow-forward" size={12} color={colors.brandPrimary} />
-                          </TouchableOpacity>
-                        </View>
-                        <Text style={styles.recentPrice}>₱{order.total_price}.00</Text>
-                      </TouchableOpacity>
-                      {idx < recentOrders.length - 1 && <View style={styles.divider} />}
-                    </View>
-                  ))}
+                  {recentOrders.map((order, idx) => {
+                    const isCancelled = order.status === 'Cancelled Remake In Progress';
+                    return (
+                      <View key={order.id}>
+                        <TouchableOpacity
+                          style={styles.recentRow}
+                          onPress={() => router.push({ pathname: '/(customer)/order-detail' as any, params: { id: order.id } })}
+                          activeOpacity={0.8}
+                        >
+                          <View style={styles.recentImg}>
+                            <Ionicons name="cafe-outline" size={20} color={colors.brandMuted} />
+                          </View>
+                          <View style={styles.recentInfo}>
+                            <View style={styles.recentNameRow}>
+                              <Text style={styles.recentName} numberOfLines={1}>
+                                {orderDisplayName(order.order_items)}
+                              </Text>
+                              {isCancelled && (
+                                <View style={styles.recentCancelledBadge}>
+                                  <Text style={styles.recentCancelledText}>Cancelled</Text>
+                                </View>
+                              )}
+                            </View>
+                            <Text style={styles.recentDate} numberOfLines={1}>{formatDateTime(order.created_at)}</Text>
+                            <TouchableOpacity
+                              style={styles.reorderBtn}
+                              activeOpacity={0.7}
+                              onPress={() => handleReorder(order)}
+                            >
+                              <Text style={styles.reorderText}>Reorder</Text>
+                              <Ionicons name="arrow-forward" size={12} color={colors.brandPrimary} />
+                            </TouchableOpacity>
+                          </View>
+                          <Text style={styles.recentPrice} numberOfLines={1}>₱{order.total_price}.00</Text>
+                        </TouchableOpacity>
+                        {idx < recentOrders.length - 1 && <View style={styles.divider} />}
+                      </View>
+                    );
+                  })}
                 </View>
               </>
             )}
@@ -262,11 +317,12 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
     orderCardDivider: { height: 1, backgroundColor: colors.bgSubtle },
     orderCardFooter: { flexDirection: 'row' },
     footerTile: {
-      flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-      gap: Sp[2], paddingVertical: Sp[3],
+      flex: 1, alignItems: 'center', justifyContent: 'center',
+      gap: 4, paddingVertical: Sp[3], paddingHorizontal: Sp[2],
     },
-    footerTileLabel: { flex: 1, fontSize: FS.label, fontWeight: '600', color: colors.textPrimary },
-    footerTileValue: { fontSize: FS.label, fontWeight: '700', color: colors.brandPrimary },
+    footerTileLabel: { fontSize: FS.caption, fontWeight: '600', color: colors.textSecondary, textAlign: 'center' },
+    footerTileValue: { fontSize: FS.label, fontWeight: '700', color: colors.brandPrimary, textAlign: 'center' },
+    footerTileTrackRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
     footerTileSep: { width: 1, backgroundColor: colors.bgSubtle },
     emptyOrderCard: {
       backgroundColor: colors.bgSurface, borderRadius: R.lg, padding: Sp[6],
@@ -286,9 +342,19 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
     recentRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: Sp[4], gap: Sp[3] },
     recentImg: {
       width: 48, height: 48, borderRadius: R.md, backgroundColor: colors.bgSubtle, flexShrink: 0,
+      alignItems: 'center', justifyContent: 'center',
     },
-    recentInfo: { flex: 1 },
-    recentName: { fontSize: FS.label, fontWeight: '600', color: colors.textPrimary, marginBottom: 2 },
+    recentInfo: { flex: 1, minWidth: 0 },
+    recentNameRow: { flexDirection: 'row', alignItems: 'center', gap: Sp[2] },
+    recentName: { flexShrink: 1, fontSize: FS.label, fontWeight: '600', color: colors.textPrimary, marginBottom: 2 },
+    recentCancelledBadge: {
+      backgroundColor: colors.statusErrorBg, borderRadius: R.sm,
+      paddingHorizontal: Sp[2], paddingVertical: 2, flexShrink: 0,
+    },
+    recentCancelledText: {
+      fontSize: FS.overline, fontWeight: '700', color: colors.statusError,
+      textTransform: 'uppercase', letterSpacing: 0.3,
+    },
     recentDate: { fontSize: FS.caption, color: colors.textSecondary, marginBottom: Sp[2] },
     reorderBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start' },
     reorderText: { fontSize: FS.label, color: colors.brandPrimary, fontWeight: '600' },

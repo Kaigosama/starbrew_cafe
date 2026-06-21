@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  ActivityIndicator, Dimensions, ScrollView, StyleSheet, Text, TextInput,
+  ActivityIndicator, Dimensions, Image, ScrollView, StyleSheet, Text, TextInput,
   TouchableOpacity, View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -15,7 +15,7 @@ import { supabase } from '../../lib/supabase';
 const SCREEN_W = Dimensions.get('window').width;
 const ITEM_W = (SCREEN_W - Sp[5] * 2 - Sp[3]) / 2;
 
-type MenuItem = { id: string; name: string; price: number; category_id: string };
+type MenuItem = { id: string; name: string; price: number; category_id: string; imageUrl: string | null };
 type Category = { id: string; name: string };
 
 const ALL_CHIP = { id: 'all', name: 'All' };
@@ -29,11 +29,15 @@ function ItemCard({ item, isFood, colors, styles }: { item: MenuItem; isFood: bo
       onPress={() =>
         router.push({
           pathname: '/(customer)/item-detail' as any,
-          params: { id: item.id, name: item.name, price: item.price.toString() },
+          params: { id: item.id, name: item.name, price: item.price.toString(), imageUrl: item.imageUrl ?? '' },
         })
       }
     >
-      <View style={styles.itemImg} />
+      {item.imageUrl ? (
+        <Image source={{ uri: item.imageUrl }} style={styles.itemImg} resizeMode="cover" />
+      ) : (
+        <View style={styles.itemImg} />
+      )}
       <View style={styles.itemBody}>
         <Text style={styles.itemName} numberOfLines={2}>{item.name}</Text>
         <Text style={styles.itemPrice}>₱{item.price}.00</Text>
@@ -51,12 +55,14 @@ function ItemCard({ item, isFood, colors, styles }: { item: MenuItem; isFood: bo
               size: '',
               milk: '',
               addOns: [],
+              imageUrl: item.imageUrl,
+              temperature: null,
             });
             return;
           }
           router.push({
             pathname: '/(customer)/item-detail' as any,
-            params: { id: item.id, name: item.name, price: item.price.toString() },
+            params: { id: item.id, name: item.name, price: item.price.toString(), imageUrl: item.imageUrl ?? '' },
           });
         }}
       >
@@ -82,7 +88,7 @@ export default function MenuScreen() {
       setLoading(true);
       const [catRes, itemRes] = await Promise.all([
         supabase.from('categories').select('id, name').order('name'),
-        supabase.from('menu_items').select('id, name, base_price, category_id').eq('is_available', true).order('name'),
+        supabase.from('menu_items').select('id, name, base_price, category_id, image_url').eq('is_available', true).order('name'),
       ]);
       if (catRes.error) console.error('categories fetch error:', catRes.error.message);
       if (itemRes.error) console.error('menu_items fetch error:', itemRes.error.message);
@@ -95,6 +101,7 @@ export default function MenuScreen() {
           name: d.name,
           price: d.base_price,
           category_id: String(d.category_id),
+          imageUrl: d.image_url ?? null,
         })));
       }
       setLoading(false);

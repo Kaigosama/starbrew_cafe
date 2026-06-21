@@ -43,6 +43,18 @@ export default function SignInScreen() {
     setSession(data.session);
     // user_metadata.role is set during sign-up; fall back to URL param for predefined accounts
     const userRole = data.session?.user?.user_metadata?.role ?? role;
+
+    const metadata = data.session?.user?.user_metadata ?? {};
+    const fullName = (metadata.full_name as string) ||
+      [metadata.firstName, metadata.lastName].filter(Boolean).join(' ');
+    if (fullName && data.session?.user?.id) {
+      const { error: profileError } = await supabase
+        .from('users')
+        .update({ full_name: fullName, role: userRole ?? 'customer' })
+        .eq('id', data.session.user.id);
+      if (profileError) console.error('users update error:', profileError.message);
+    }
+
     router.replace(userRole === 'barista' ? '/(barista)/dashboard' : '/(customer)');
   }
 
@@ -118,7 +130,11 @@ export default function SignInScreen() {
               </View>
             </View>
 
-            <TouchableOpacity style={styles.forgotRow} activeOpacity={0.7}>
+            <TouchableOpacity
+              style={styles.forgotRow}
+              activeOpacity={0.7}
+              onPress={() => router.push('/(auth)/forgot-password')}
+            >
               <Text style={styles.forgotText}>Forgot password?</Text>
             </TouchableOpacity>
 

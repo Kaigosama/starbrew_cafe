@@ -9,6 +9,8 @@ export type CartItem = {
   milk: string;
   addOns: string[];
   qty: number;
+  imageUrl: string | null;
+  temperature: 'Hot' | 'Cold' | null;
 };
 
 interface CartState {
@@ -24,7 +26,7 @@ export const useCartStore = create<CartState>((set) => ({
 
   addItem: (item) =>
     set((state) => {
-      const key = `${item.id}-${item.size}-${item.milk}-${item.addOns.join(',')}`;
+      const key = `${item.id}-${item.size}-${item.milk}-${item.addOns.join(',')}-${item.temperature ?? ''}`;
       const existing = state.items.find((i) => i.id === key);
       if (existing) {
         return {

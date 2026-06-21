@@ -15,10 +15,8 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
+        "backgroundColor": "#6B3F2A",
+        "foregroundImage": "./assets/icon.png"
       },
       "package": "com.kaigosamasteam.starbrewcafe",
       "googleServicesFile": "./google-services.json"

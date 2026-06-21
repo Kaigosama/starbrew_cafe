@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { router } from 'expo-router';
@@ -75,15 +75,23 @@ export default function CartScreen() {
                             size: item.size,
                             milk: item.milk,
                             addOns: item.addOns.join(','),
+                            imageUrl: item.imageUrl ?? '',
+                            temperature: item.temperature ?? '',
                           },
                         });
                       }}
                     >
-                      <View style={styles.itemImg} />
+                      {item.imageUrl ? (
+                        <Image source={{ uri: item.imageUrl }} style={styles.itemImg} resizeMode="cover" />
+                      ) : (
+                        <View style={styles.itemImg} />
+                      )}
                       <View style={styles.itemInfo}>
                         <Text style={styles.itemName} numberOfLines={2}>{item.name}</Text>
-                        {item.size && item.milk && (
-                          <Text style={styles.itemMeta}>{item.size} · {item.milk}</Text>
+                        {item.size && (
+                          <Text style={styles.itemMeta}>
+                            {item.temperature ? `${item.temperature} · ` : ''}{item.size}{item.milk ? ` · ${item.milk}` : ''}
+                          </Text>
                         )}
                         {item.addOns.length > 0 && (
                           <Text style={styles.itemAddOns}>{item.addOns.join(', ')}</Text>
