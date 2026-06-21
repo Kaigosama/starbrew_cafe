@@ -20,7 +20,8 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "package": "com.kaigosamasteam.starbrewcafe"
+      "package": "com.kaigosamasteam.starbrewcafe",
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -33,7 +34,8 @@
         {
           "cameraPermission": "Allow StarBrew Cafe to access your camera to scan order QR codes."
         }
-      ]
+      ],
+      "expo-notifications"
     ],
     "extra": {
       "router": {},
