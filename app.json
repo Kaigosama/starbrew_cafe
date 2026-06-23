@@ -18,8 +18,7 @@
         "backgroundColor": "#6B3F2A",
         "foregroundImage": "./assets/icon.png"
       },
-      "package": "com.kaigosamasteam.starbrewcafe",
-      "googleServicesFile": "./google-services.json"
+      "package": "com.kaigosamasteam.starbrewcafe"
     },
     "web": {
       "favicon": "./assets/favicon.png"
