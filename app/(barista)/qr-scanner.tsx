@@ -3,7 +3,7 @@ import { Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import { R, FS, Sp } from '../../constants/theme';
 import { useTheme } from '../../context/ThemeContext';
@@ -32,6 +32,16 @@ export default function QRScannerScreen() {
     setProcessing(false);
   }, []);
 
+  // Re-arm the scanner every time the screen is focused. Expo Router can retain
+  // this screen's instance between visits, which would otherwise leave
+  // scannedRef stuck `true` after the first scan and block every later scan.
+  useFocusEffect(
+    useCallback(() => {
+      scannedRef.current = false;
+      setProcessing(false);
+    }, [])
+  );
+
   const finishPickup = useCallback(async (order: ScannedOrder) => {
     const { error: updateError } = await supabase
       .from('orders')
@@ -53,10 +63,12 @@ export default function QRScannerScreen() {
     scannedRef.current = true;
     setProcessing(true);
 
+    const scannedId = (data ?? '').trim();
+
     const { data: rawOrder, error } = await supabase
       .from('orders')
       .select('id, status, users(full_name), order_items(quantity, menu_items(name))')
-      .eq('id', data)
+      .eq('id', scannedId)
       .maybeSingle();
     const order = rawOrder as unknown as ScannedOrder | null;
 

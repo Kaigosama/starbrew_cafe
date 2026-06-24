@@ -301,7 +301,7 @@ export default function BaristaDashboard() {
                     styles.statusText,
                     { color: isCancelled ? STATUS_CONFIG[order.status].color : colors.textDisabled },
                   ]}>
-                    {isCancelled ? 'Not Picked Up' : 'Done'}
+                    {isCancelled ? 'Cancelled Order' : 'Done'}
                   </Text>
                 </View>
               </TouchableOpacity>

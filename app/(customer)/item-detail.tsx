@@ -8,12 +8,17 @@ import { R, FS, Sp, cardShadow } from '../../constants/theme';
 import { useTheme } from '../../context/ThemeContext';
 import { useCartStore } from '../../store/cartStore';
 import { supabase } from '../../lib/supabase';
+import { ADD_ON_PRICE, formatModifier } from '../../lib/pricing';
 
 const SIZES = ['Short', 'Tall', 'Grande', 'Venti'] as const;
 type Size = typeof SIZES[number];
 
 const MILK_OPTIONS = ['Whole Milk', 'Oat Milk', 'Almond Milk', 'Soy Milk'];
 const ADD_ONS = ['Extra Shot', 'Vanilla Syrup', 'Caramel Drizzle', 'Whipped Cream'];
+
+function normalizeMilkKey(v: string) {
+  return v.replace(/\s*milk\s*$/i, '').trim().toLowerCase();
+}
 
 export default function ItemDetailScreen() {
   const { colors, isDark } = useTheme();
@@ -28,14 +33,16 @@ export default function ItemDetailScreen() {
     }>();
   const itemId = id ?? '0';
   const itemName = name ?? 'Cold Brew';
-  const basePrice = parseInt(price ?? '175', 10);
   const isEditing = !!cartItemId;
 
+  const [basePrice, setBasePrice] = useState(parseInt(price ?? '175', 10));
   const [size, setSize] = useState<Size>((sizeParam as Size) || 'Grande');
   const [milk, setMilk] = useState(milkParam || 'Whole Milk');
   const [addOns, setAddOns] = useState<string[]>(addOnsParam ? addOnsParam.split(',').filter(Boolean) : []);
   const [qty, setQty] = useState(qtyParam ? parseInt(qtyParam, 10) : 1);
   const [isFood, setIsFood] = useState(false);
+  const [sizeModifiers, setSizeModifiers] = useState<Record<string, number>>({});
+  const [milkModifiers, setMilkModifiers] = useState<Record<string, number>>({});
   const [servesHot, setServesHot] = useState(false);
   const [servesCold, setServesCold] = useState(false);
   const [imageUrlHot, setImageUrlHot] = useState<string | null>(imageUrlParam || null);
@@ -50,7 +57,7 @@ export default function ItemDetailScreen() {
   useEffect(() => {
     supabase
       .from('menu_items')
-      .select('categories(name), serves_hot, serves_cold, image_url, image_url_cold, description, description_cold, has_milk_options')
+      .select('base_price, categories(name), serves_hot, serves_cold, image_url, image_url_cold, description, description_cold, has_milk_options')
       .eq('id', itemId)
       .single()
       .then(({ data, error }) => {
@@ -67,9 +74,33 @@ export default function ItemDetailScreen() {
         setDescriptionHot(data?.description ?? null);
         setDescriptionCold(data?.description_cold ?? null);
         setHasMilkOptions(data?.has_milk_options !== false);
+        if (data?.base_price != null) setBasePrice(data.base_price);
         if (!temperatureParam) {
           setTemperature(data?.serves_hot ? 'Hot' : data?.serves_cold ? 'Cold' : null);
         }
+      });
+
+    supabase
+      .from('customization_options')
+      .select('option_group, option_value, price_modifier')
+      .eq('menu_item_id', itemId)
+      .then(({ data, error }) => {
+        if (error) {
+          console.error('customization_options fetch error:', error.message);
+          return;
+        }
+        const sizeMap: Record<string, number> = {};
+        const milkMap: Record<string, number> = {};
+        (data ?? []).forEach((row) => {
+          const modifier = Number(row.price_modifier) || 0;
+          if (row.option_group === 'Size') sizeMap[row.option_value] = modifier;
+          // DB rows store the short form ("Whole", "Oat"); the picker uses
+          // full labels ("Whole Milk", "Oat Milk") — key on the normalized
+          // form so either convention matches.
+          else if (row.option_group === 'Milk') milkMap[normalizeMilkKey(row.option_value)] = modifier;
+        });
+        setSizeModifiers(sizeMap);
+        setMilkModifiers(milkMap);
       });
   }, [itemId]);
 
@@ -85,8 +116,11 @@ export default function ItemDetailScreen() {
     );
   }
 
-  const addOnsTotal = isFood ? 0 : addOns.length * 20;
-  const total = (basePrice + addOnsTotal) * qty;
+  const addOnsTotal = isFood ? 0 : addOns.length * ADD_ON_PRICE;
+  const sizeAdj = isFood ? 0 : (sizeModifiers[size] ?? 0);
+  const milkAdj = isFood || !hasMilkOptions ? 0 : (milkModifiers[normalizeMilkKey(milk)] ?? 0);
+  const unitPrice = basePrice + addOnsTotal + sizeAdj + milkAdj;
+  const total = unitPrice * qty;
 
   function handleAddToCart() {
     if (isEditing) {
@@ -97,7 +131,7 @@ export default function ItemDetailScreen() {
         id: itemId,
         menuItemId: Number(itemId),
         name: itemName,
-        price: basePrice + addOnsTotal,
+        price: unitPrice,
         size: isFood ? '' : size,
         milk: isFood || !hasMilkOptions ? '' : milk,
         addOns: isFood ? [] : addOns,
@@ -167,37 +201,51 @@ export default function ItemDetailScreen() {
           <>
             <Text style={styles.optionLabel}>Size</Text>
             <View style={styles.sizeRow}>
-              {SIZES.map(s => (
-                <TouchableOpacity
-                  key={s}
-                  style={[styles.sizeBtn, size === s && styles.sizeBtnActive]}
-                  onPress={() => setSize(s)}
-                  activeOpacity={0.8}
-                >
-                  <Text style={[styles.sizeBtnText, size === s && styles.sizeBtnTextActive]}>{s}</Text>
-                </TouchableOpacity>
-              ))}
+              {SIZES.map(s => {
+                const deltaLabel = formatModifier(sizeModifiers[s] ?? 0);
+                return (
+                  <TouchableOpacity
+                    key={s}
+                    style={[styles.sizeBtn, size === s && styles.sizeBtnActive]}
+                    onPress={() => setSize(s)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.sizeBtnText, size === s && styles.sizeBtnTextActive]}>{s}</Text>
+                    {deltaLabel !== '' && (
+                      <Text style={[styles.sizeBtnDelta, size === s && styles.sizeBtnTextActive]}>
+                        {deltaLabel}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
             </View>
 
             {hasMilkOptions && (
               <>
                 <Text style={styles.optionLabel}>Milk</Text>
                 <View style={[styles.optionCard, cardShadow]}>
-                  {MILK_OPTIONS.map((opt, idx) => (
-                    <View key={opt}>
-                      <TouchableOpacity
-                        style={styles.radioRow}
-                        onPress={() => setMilk(opt)}
-                        activeOpacity={0.7}
-                      >
-                        <Text style={styles.radioLabel}>{opt}</Text>
-                        <View style={[styles.radioCircle, milk === opt && styles.radioCircleActive]}>
-                          {milk === opt && <View style={styles.radioDot} />}
-                        </View>
-                      </TouchableOpacity>
-                      {idx < MILK_OPTIONS.length - 1 && <View style={styles.divider} />}
-                    </View>
-                  ))}
+                  {MILK_OPTIONS.map((opt, idx) => {
+                    const modLabel = formatModifier(milkModifiers[normalizeMilkKey(opt)] ?? 0);
+                    return (
+                      <View key={opt}>
+                        <TouchableOpacity
+                          style={styles.radioRow}
+                          onPress={() => setMilk(opt)}
+                          activeOpacity={0.7}
+                        >
+                          <View style={styles.radioLabelCol}>
+                            <Text style={styles.radioLabel}>{opt}</Text>
+                            {modLabel !== '' && <Text style={styles.radioModifier}>{modLabel}</Text>}
+                          </View>
+                          <View style={[styles.radioCircle, milk === opt && styles.radioCircleActive]}>
+                            {milk === opt && <View style={styles.radioDot} />}
+                          </View>
+                        </TouchableOpacity>
+                        {idx < MILK_OPTIONS.length - 1 && <View style={styles.divider} />}
+                      </View>
+                    );
+                  })}
                 </View>
               </>
             )}
@@ -343,6 +391,7 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
     },
     sizeBtnActive: { borderColor: colors.brandPrimary, backgroundColor: colors.bgSubtle },
     sizeBtnText: { fontSize: FS.label, fontWeight: '600', color: colors.textSecondary },
+    sizeBtnDelta: { fontSize: FS.caption, fontWeight: '600', color: colors.textDisabled, marginTop: 2 },
     sizeBtnTextActive: { color: colors.brandPrimary },
 
     optionCard: {
@@ -358,7 +407,9 @@ function makeStyles(colors: ReturnType<typeof useTheme>['colors']) {
       justifyContent: 'space-between',
       paddingVertical: Sp[3] + 1,
     },
+    radioLabelCol: { flex: 1 },
     radioLabel: { fontSize: FS.body, color: colors.textPrimary, fontWeight: '400' },
+    radioModifier: { fontSize: FS.caption, color: colors.textSecondary, marginTop: 2 },
     radioCircle: {
       width: 20,
       height: 20,

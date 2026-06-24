@@ -60,24 +60,22 @@ export default function ActivityScreen() {
   const addItem = useCartStore((s) => s.addItem);
   const clearCart = useCartStore((s) => s.clear);
 
-  const [activeOrder, setActiveOrder] = useState<Order | null>(null);
+  const [activeOrders, setActiveOrders] = useState<Order[]>([]);
   const [recentOrders, setRecentOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchOrders = useCallback(async () => {
     if (!user) return;
 
-    // Most recent non-completed order
+    // All non-completed orders (newest first) so multiple active orders stack
     const { data: active, error: activeError } = await supabase
       .from('orders')
       .select('id, queue_position, status, total_price, estimated_eta_min, created_at, order_items(quantity, unit_price, menu_item_id, customizations, menu_items(name, image_url))')
       .eq('customer_id', user.id)
       .neq('status', 'Picked Up')
       .neq('status', 'Cancelled Remake In Progress')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (activeError) console.error('activity active order error:', activeError.message);
+      .order('created_at', { ascending: false });
+    if (activeError) console.error('activity active orders error:', activeError.message);
 
     // Recent completed or cancelled orders
     const { data: recent, error: recentError } = await supabase
@@ -89,7 +87,7 @@ export default function ActivityScreen() {
       .limit(5);
     if (recentError) console.error('activity recent orders error:', recentError.message);
 
-    setActiveOrder(active as Order | null);
+    setActiveOrders((active ?? []) as Order[]);
     setRecentOrders((recent ?? []) as Order[]);
   }, [user]);
 
@@ -158,9 +156,13 @@ export default function ActivityScreen() {
           </View>
         ) : (
           <>
-            <Text style={styles.sectionLabel}>My Order</Text>
-            {activeOrder ? (
+            <Text style={styles.sectionLabel}>
+              {activeOrders.length > 1 ? 'My Orders' : 'My Order'}
+            </Text>
+            {activeOrders.length > 0 ? (
+              activeOrders.map((activeOrder) => (
               <TouchableOpacity
+                key={activeOrder.id}
                 style={[styles.orderCard, cardShadow]}
                 onPress={() => router.push({ pathname: '/(customer)/order-status' as any, params: { id: activeOrder.id } })}
                 activeOpacity={0.85}
@@ -204,6 +206,7 @@ export default function ActivityScreen() {
                   </View>
                 </View>
               </TouchableOpacity>
+              ))
             ) : (
               <View style={[styles.emptyOrderCard, cardShadow]}>
                 <Ionicons name="cafe-outline" size={32} color={colors.textDisabled} />

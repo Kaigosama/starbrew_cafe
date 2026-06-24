@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { R, FS, Sp, cardShadow } from '../../constants/theme';
 import { useTheme } from '../../context/ThemeContext';
 import { useCartStore } from '../../store/cartStore';
+import { ADD_ON_PRICE } from '../../lib/pricing';
 
 export default function CartScreen() {
   const { colors, isDark } = useTheme();
@@ -63,13 +64,16 @@ export default function CartScreen() {
                       style={styles.itemTapArea}
                       activeOpacity={0.7}
                       onPress={() => {
-                        const addOnsTotal = item.addOns.length * 20;
+                        // Best-effort initial price for the flash before item-detail
+                        // re-fetches the canonical base_price + modifiers from Supabase.
+                        const addOnsTotal = item.addOns.length * ADD_ON_PRICE;
+                        const approxBasePrice = item.price - addOnsTotal;
                         router.push({
                           pathname: '/(customer)/item-detail' as any,
                           params: {
                             id: String(item.menuItemId),
                             name: item.name,
-                            price: String(item.price - addOnsTotal),
+                            price: String(approxBasePrice),
                             cartItemId: item.id,
                             qty: String(item.qty),
                             size: item.size,
