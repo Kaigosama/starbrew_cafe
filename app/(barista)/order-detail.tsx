@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -69,20 +69,46 @@ export default function BaristaOrderDetailScreen() {
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const fetchOrder = useCallback(async () => {
+    if (!id) return;
+    const { data, error } = await supabase
+      .from('orders')
+      .select('id, queue_position, status, pickup_method, payment_method, total_price, created_at, users(full_name), order_items(quantity, unit_price, customizations, menu_items(name, image_url, image_url_cold))')
+      .eq('id', id)
+      .maybeSingle();
+    if (error) console.error('barista order-detail fetch error:', error.message);
+    setOrder(data as unknown as Order | null);
+  }, [id]);
+
   useEffect(() => {
     if (!id) return;
+    let isMounted = true;
+
     (async () => {
       setLoading(true);
-      const { data, error } = await supabase
-        .from('orders')
-        .select('id, queue_position, status, pickup_method, payment_method, total_price, created_at, users(full_name), order_items(quantity, unit_price, customizations, menu_items(name, image_url, image_url_cold))')
-        .eq('id', id)
-        .maybeSingle();
-      if (error) console.error('barista order-detail fetch error:', error.message);
-      setOrder(data as unknown as Order | null);
-      setLoading(false);
+      await fetchOrder();
+      if (isMounted) setLoading(false);
     })();
-  }, [id]);
+
+    // Scanning the customer's QR (qr-scanner.tsx) updates the order's status
+    // to "Picked Up" elsewhere and pops back to this screen — without this
+    // subscription the screen would still show the stale "Ready" status.
+    const channel = supabase
+      .channel(`barista-order-detail-${id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'orders', filter: `id=eq.${id}` },
+        () => {
+          if (isMounted) fetchOrder();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      supabase.removeChannel(channel);
+    };
+  }, [id, fetchOrder]);
 
   const cfg = order ? STATUS_CONFIG[order.status] : null;
   const customerName = order?.users?.full_name?.trim() || 'Customer';
