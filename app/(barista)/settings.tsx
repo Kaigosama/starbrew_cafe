@@ -171,12 +171,12 @@ export default function BaristaSettingsScreen() {
         <Text style={styles.sectionTitle}>General</Text>
         <View style={[styles.card, cardShadow]}>
           {[
-            { label: 'About StarBrew Cafe', icon: 'information-circle-outline' as const },
-            { label: 'Terms & Conditions',  icon: 'document-text-outline' as const },
-            { label: 'Privacy Policy',      icon: 'shield-outline' as const },
+            { label: 'About StarBrew Cafe', icon: 'information-circle-outline' as const, onPress: () => router.push({ pathname: '/(barista)/legal', params: { doc: 'about' } } as any) },
+            { label: 'Terms & Conditions',  icon: 'document-text-outline' as const, onPress: () => router.push({ pathname: '/(barista)/legal', params: { doc: 'terms' } } as any) },
+            { label: 'Privacy Policy',      icon: 'shield-outline' as const, onPress: () => router.push({ pathname: '/(barista)/legal', params: { doc: 'privacy' } } as any) },
           ].map((row, idx, arr) => (
             <View key={row.label}>
-              <TouchableOpacity style={styles.menuRow} activeOpacity={0.7}>
+              <TouchableOpacity style={styles.menuRow} activeOpacity={0.7} onPress={row.onPress}>
                 <View style={styles.menuRowLeft}>
                   <View style={styles.switchIcon}>
                     <Ionicons name={row.icon} size={18} color={colors.brandSecondary} />

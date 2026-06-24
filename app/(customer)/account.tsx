@@ -45,9 +45,9 @@ export default function AccountScreen() {
     {
       title: 'Support',
       rows: [
-        { label: 'About StarBrew Cafe', icon: 'information-circle-outline' },
-        { label: 'Terms & Conditions',  icon: 'document-text-outline' },
-        { label: 'Privacy Policy',      icon: 'shield-outline' },
+        { label: 'About StarBrew Cafe', icon: 'information-circle-outline', onPress: () => router.push({ pathname: '/(customer)/legal', params: { doc: 'about' } } as any) },
+        { label: 'Terms & Conditions',  icon: 'document-text-outline', onPress: () => router.push({ pathname: '/(customer)/legal', params: { doc: 'terms' } } as any) },
+        { label: 'Privacy Policy',      icon: 'shield-outline', onPress: () => router.push({ pathname: '/(customer)/legal', params: { doc: 'privacy' } } as any) },
       ],
     },
   ];

@@ -85,6 +85,7 @@ export default function BaristaLayout() {
       <Tabs.Screen name="qr-scanner" options={{ href: null }} />
       <Tabs.Screen name="order-detail" options={{ href: null }} />
       <Tabs.Screen name="edit-profile" options={{ href: null }} />
+      <Tabs.Screen name="legal" options={{ href: null }} />
     </Tabs>
   );
 }

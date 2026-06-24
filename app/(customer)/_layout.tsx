@@ -93,6 +93,7 @@ export default function CustomerLayout() {
       <Tabs.Screen name="order-history"      options={{ href: null }} />
       <Tabs.Screen name="notifications"      options={{ href: null }} />
       <Tabs.Screen name="edit-profile"       options={{ href: null }} />
+      <Tabs.Screen name="legal"              options={{ href: null }} />
     </Tabs>
   );
 }

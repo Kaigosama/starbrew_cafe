@@ -42,7 +42,7 @@ export default function CartScreen() {
           <Text style={styles.emptyText}>Add items from the menu to get started</Text>
           <TouchableOpacity
             style={styles.browseBtn}
-            onPress={() => router.back()}
+            onPress={() => router.push('/(customer)/menu' as any)}
             activeOpacity={0.85}
           >
             <Text style={styles.browseBtnText}>Browse Menu</Text>
@@ -128,7 +128,7 @@ export default function CartScreen() {
 
             <TouchableOpacity
               style={styles.addMoreRow}
-              onPress={() => router.back()}
+              onPress={() => router.push('/(customer)/menu' as any)}
               activeOpacity={0.7}
             >
               <Ionicons name="add-circle-outline" size={16} color={colors.brandPrimary} />
