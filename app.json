@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "starbrew-cafe",
+    "name": "StarBrew Cafe",
     "slug": "starbrew-cafe",
     "scheme": "starbrew-cafe",
     "version": "1.0.0",
@@ -15,7 +15,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#6B3F2A",
+        "backgroundColor": "#4C2E1C",
         "foregroundImage": "./assets/icon.png"
       },
       "package": "com.kaigosamasteam.starbrewcafe"
